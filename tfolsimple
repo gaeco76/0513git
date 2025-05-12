@@ -1,0 +1,959 @@
+// ==UserScript==
+// @name         utility
+// @namespace    http://tampermonkey.net/
+// @version      0.2
+// @description  댓글에서 숫자를 추출하고 편집 도구를 제공합니다
+// @match        *://*/*
+// @grant        none
+// @author       댓글도우미
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    // 스타일 상수 정의
+    const COLORS = {
+        primary: '#2196F3',
+        success: '#4CAF50',
+        danger: '#f44336',
+        neutral: '#607D8B',
+        panelBg: '#f9f9f9',
+        tableBg: '#f0f0f0',
+        border: '#ccc'
+    };
+
+    // CSS 스타일 정의
+    const styles = `
+        .draggable-panel {
+            position: fixed;
+            background: ${COLORS.panelBg};
+            border-radius: 16px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            display: flex;
+            flex-direction: column;
+            z-index: 9999;
+            overflow: hidden;
+            min-width: 120px;
+            min-height: 190px; /* 최소 높이 약간 수정 */
+            transition: all 0.3s ease;
+            padding: 8px;
+        }
+
+        .panel-header {
+            cursor: move;
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 4px;
+            height: 24px;
+            flex-shrink: 0;
+            z-index: 10001;
+            background: ${COLORS.panelBg};
+            position: sticky;
+            top: 0;
+        }
+
+        .toggle-button {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border: none;
+            background: #ddd;
+            cursor: pointer;
+            text-align: center;
+            line-height: 22px;
+            font-size: 16px;
+            padding: 0;
+            transition: all 0.3s ease;
+        }
+
+        .content-container {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            gap: 6px;
+            flex: 1;
+            overflow: auto; /* 스크롤 다시 활성화 */
+            min-height: 140px;
+            padding-top: 2px;
+            padding-bottom: 34px; /* 하단 버튼 높이만큼 패딩 추가 */
+        }
+
+        .resize-handle {
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            bottom: 3px;
+            right: 3px;
+            cursor: nwse-resize;
+            z-index: 10002;
+            background-color: transparent;
+        }
+
+        .select-box {
+            margin: 0;
+            padding: 4px 4px;
+            border-radius: 10px;
+            border: 1px solid ${COLORS.border};
+            font-size: 14px;
+            flex-grow: 0;
+            flex-shrink: 0;
+            height: 32px; /* 고정 높이 */
+        }
+
+        .label-container {
+            margin: 0;
+            padding: 4px 4px;
+            border-radius: 10px;
+            border: 1px solid ${COLORS.border};
+            height: 32px; /* 고정 높이 */
+            background: #fff;
+            cursor: text;
+            display: flex;
+            align-items: center;
+            overflow: hidden;
+            flex-grow: 0;
+            flex-shrink: 0;
+        }
+
+        .label-text {
+            width: 100%;
+            font-size: 14px;
+            outline: none;
+            line-height: 1.4;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .button-container {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 0;
+            gap: 4px;
+            flex-shrink: 0;
+            min-height: 26px;
+            position: relative;
+            z-index: 100; /* z-index 낮춤 */
+        }
+
+        .action-button {
+            flex: 1;
+            padding: 4px 2px;
+            border-radius: 8px;
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: bold;
+            transition: background-color 0.2s;
+        }
+
+        .button-paste { background-color: ${COLORS.success}; }
+        .button-inspect { background-color: ${COLORS.primary}; }
+        .button-save { background-color: ${COLORS.neutral}; }
+        .button-top { background-color: ${COLORS.primary}; }
+        .button-bottom { background-color: ${COLORS.primary}; }
+
+        .info-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0;
+            border: 1px solid ${COLORS.border};
+            border-radius: 10px;
+            overflow: hidden;
+            font-size: 13px;
+            background-color: ${COLORS.tableBg};
+            flex-grow: 0;
+            flex-shrink: 0;
+            height: 55px; /* 테이블 높이 축소 */
+            position: relative;
+            z-index: 10; /* 낮은 z-index */
+            table-layout: fixed; /* 고정 레이아웃으로 설정 */
+        }
+
+        .table-cell {
+            padding: 4px 4px;
+            text-align: left;
+            line-height: 1.4; /* 줄 간격 축소 */
+            height: 25px; /* 셀 높이 축소 */
+        }
+
+        .table-cell-label {
+            font-weight: bold;
+            width: 1%; /* 내용에 맞게 최소 너비로 설정 */
+            white-space: nowrap; /* 텍스트 줄바꿈 방지 */
+            border-right: 1px solid ${COLORS.border};
+        }
+
+        .table-cell-value {
+            border-top: 1px solid ${COLORS.border};
+            white-space: nowrap; /* 텍스트 줄바꿈 방지 */
+            overflow: hidden;
+            text-overflow: ellipsis; /* 넘치는 텍스트는 ... 처리 */
+        }
+
+        .extra-button-container {
+            display: flex;
+            justify-content: space-between;
+            gap: 4px;
+            margin-top: 4px;
+            margin-bottom: 0;
+            flex-shrink: 0;
+            min-height: 26px;
+            position: fixed; /* sticky 대신 fixed 사용 */
+            z-index: 10002; /* 가장 높은 z-index */
+            bottom: 8px; /* 패널 패딩 고려 */
+            left: 8px; /* 패널 패딩 고려 */
+            right: 8px; /* 패널 패딩 고려 */
+            background: ${COLORS.panelBg};
+            padding-top: 2px;
+            padding-bottom: 2px;
+            width: calc(100% - 16px); /* 패널 패딩 고려 */
+        }
+    `;
+
+    // CSS 스타일 추가
+    const styleSheet = document.createElement("style");
+    styleSheet.textContent = styles;
+    document.head.appendChild(styleSheet);
+
+    // 기본 설정 값
+    const DEFAULT_SETTINGS = {
+        top: '20%',
+        left: '20%',
+        width: '200px',
+        height: 'auto',
+        isCollapsed: false,
+        fontSize: 12,
+        panelPadding: 12,
+        headerMargin: 6,
+        buttonPadding: '6px 2px',
+        cellPadding: '6px',
+        selectPadding: '8px',
+        containerGap: '6px',
+        buttonContainerGap: '4px'
+    };
+
+    // 설정 관리
+    class SettingsManager {
+        constructor(storageKey) {
+            this.storageKey = storageKey;
+            this.settings = this.load();
+
+            // 디버깅: 설정 로드 확인
+            console.log('설정 로드:', this.settings);
+        }
+
+        load() {
+            try {
+                const savedSettings = localStorage.getItem(this.storageKey);
+                return savedSettings ? { ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) } : { ...DEFAULT_SETTINGS };
+            } catch (e) {
+                console.error('설정 로드 오류:', e);
+                return { ...DEFAULT_SETTINGS };
+            }
+        }
+
+        save(newSettings) {
+            try {
+                this.settings = { ...this.settings, ...newSettings };
+                localStorage.setItem(this.storageKey, JSON.stringify(this.settings));
+
+                // 디버깅: 설정 저장 확인
+                console.log('설정 저장:', this.settings);
+            } catch (e) {
+                console.error('설정 저장 오류:', e);
+            }
+        }
+
+        get(key) {
+            return this.settings[key];
+        }
+    }
+
+    // UI 요소 생성 헬퍼
+    class UIFactory {
+        static createElement(tag, className, attributes = {}) {
+            const element = document.createElement(tag);
+            if (className) {
+                element.className = className;
+            }
+
+            Object.entries(attributes).forEach(([prop, value]) => {
+                if (prop === 'text') {
+                    element.textContent = value;
+                } else if (prop === 'html') {
+                    element.innerHTML = value;
+                } else {
+                    element[prop] = value;
+                }
+            });
+
+            return element;
+        }
+
+        static createButton(text, className) {
+            return this.createElement('button', `action-button ${className}`, { text });
+        }
+    }
+
+    // 패널 관리 클래스
+    class DraggablePanel {
+        constructor(settingsManager) {
+            this.settings = settingsManager;
+            this.isPanelCollapsed = this.settings.get('isCollapsed');
+            this.isDragging = false;
+            this.isResizing = false;
+            this.offsetX = 0;
+            this.offsetY = 0;
+            this.lastX = 0;
+            this.lastY = 0;
+            this.animationFrameId = null;
+
+            // 패널 생성
+            this.createPanelElements();
+            this.initEventListeners();
+
+            // 초기 상태 설정
+            setTimeout(() => {
+                if (this.isPanelCollapsed) {
+                    this.collapsePanel();
+                } else {
+                    this.applyAllStyles();
+                }
+            }, 0);
+        }
+
+        createPanelElements() {
+            // 패널 요소 생성
+            this.panel = UIFactory.createElement('div', 'draggable-panel', {
+                id: 'draggablePanel',
+                style: `top: ${this.settings.get('top')}; left: ${this.settings.get('left')}; width: ${this.settings.get('width')}; height: ${this.settings.get('height')};`
+            });
+
+            this.header = UIFactory.createElement('div', 'panel-header');
+            this.toggleBtn = UIFactory.createElement('button', 'toggle-button', { text: '-', title: '접기/펼치기' });
+            this.contentContainer = UIFactory.createElement('div', 'content-container');
+            this.resizeHandle = UIFactory.createElement('div', 'resize-handle');
+
+            // 패널 구성
+            this.header.appendChild(this.toggleBtn);
+            this.panel.appendChild(this.header);
+            this.panel.appendChild(this.contentContainer);
+            this.panel.appendChild(this.resizeHandle);
+            document.body.appendChild(this.panel);
+        }
+
+        applyAllStyles() {
+            // 패널 크기 설정
+            const width = parseFloat(this.settings.get('width')) || 200;
+            const height = parseFloat(this.settings.get('height')) || 300;
+
+            // 패널 내부 요소 크기 조정
+            this.resizeInternalComponents(width, height);
+        }
+
+        initEventListeners() {
+            this.toggleBtn.addEventListener('click', () => this.togglePanel());
+            this.header.addEventListener('mousedown', (e) => this.startDragging(e));
+            this.resizeHandle.addEventListener('mousedown', (e) => this.startResizing(e));
+            document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+            document.addEventListener('mouseup', () => this.endDragResize());
+        }
+
+        startDragging(e) {
+            this.isDragging = true;
+            this.offsetX = e.clientX - this.panel.getBoundingClientRect().left;
+            this.offsetY = e.clientY - this.panel.getBoundingClientRect().top;
+            this.panel.style.transition = 'none';
+            e.preventDefault();
+        }
+
+        startResizing(e) {
+            this.isResizing = true;
+            this.panel.style.transition = 'none';
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        handleMouseMove(e) {
+            if (this.isDragging) {
+                if (this.animationFrameId) {
+                    cancelAnimationFrame(this.animationFrameId);
+                }
+
+                this.animationFrameId = requestAnimationFrame(() => {
+                    const newX = e.clientX - this.offsetX;
+                    const newY = e.clientY - this.offsetY;
+                    this.updatePanelPosition(newX, newY);
+                });
+            } else if (this.isResizing) {
+                const rect = this.panel.getBoundingClientRect();
+                const newWidth = e.clientX - rect.left;
+                const newHeight = e.clientY - rect.top;
+
+                const minWidth = 120;
+                const minHeight = 190; // 최소 높이 조정
+
+                const width = Math.max(minWidth, newWidth);
+                const height = Math.max(minHeight, newHeight);
+
+                // 크기 설정
+                this.panel.style.width = width + 'px';
+                this.panel.style.height = height + 'px';
+
+                // 패널 내부 요소 크기 조정
+                this.resizeInternalComponents(width, height);
+            }
+        }
+
+        resizeInternalComponents(width, height) {
+            // 스케일 계산
+            const baseWidth = 240;
+            const baseHeight = 300;
+            const scale = Math.min(width / baseWidth, height / baseHeight);
+
+            // 폰트 크기 계산 (최소 9px, 최대 14px)
+            const baseFontSize = 11;
+            const fontSize = Math.max(9, Math.min(14, Math.round(baseFontSize * Math.sqrt(scale))));
+
+            // 패널 패딩은 작게 유지 (최소 4px, 최대 12px)
+            const panelPadding = Math.max(4, Math.min(12, Math.round(8 * scale)));
+            this.panel.style.padding = `${panelPadding}px`;
+
+            // 헤더 마진 (최소 2px, 최대 6px)
+            const headerMargin = Math.max(2, Math.min(6, Math.round(4 * scale)));
+            this.header.style.marginBottom = `${headerMargin}px`;
+
+            // 폰트 크기 설정 (토글 버튼 제외)
+            const textElements = this.panel.querySelectorAll('button:not(.toggle-button), select, td, .label-text');
+            textElements.forEach(element => {
+                element.style.fontSize = `${fontSize}px`;
+            });
+
+            // 버튼 패딩 및 크기 설정 (버튼만 크기 조절)
+            const buttonPaddingV = Math.max(2, Math.min(6, Math.round(4 * scale)));
+            const buttonPaddingH = Math.max(1, Math.round(2 * scale));
+            const buttonPadding = `${buttonPaddingV}px ${buttonPaddingH}px`;
+
+            const buttons = this.panel.querySelectorAll('.action-button');
+            buttons.forEach(button => {
+                button.style.padding = buttonPadding;
+                // 버튼 높이만 조절
+                button.style.height = `${Math.max(20, Math.round(24 * scale))}px`;
+            });
+
+            // 셀 패딩 설정 (높이는 고정)
+            const cellPadding = `${Math.max(2, Math.min(6, Math.round(4 * scale)))}px ${Math.max(2, Math.min(4, Math.round(3 * scale)))}px`;
+            const cells = this.panel.querySelectorAll('td');
+            cells.forEach(cell => {
+                cell.style.padding = cellPadding;
+                cell.style.lineHeight = '1.8';
+                // 셀 높이는 고정 (32px)으로 유지
+            });
+
+            // 셀렉트 박스 패딩 설정 (높이는 고정)
+            const selectPadding = `${Math.max(3, Math.min(8, Math.round(6 * scale)))}px`;
+            const selects = this.panel.querySelectorAll('select');
+            selects.forEach(select => {
+                select.style.padding = selectPadding;
+                // 셀렉트 박스 높이는 고정 (32px)으로 유지
+            });
+
+            // 컨테이너 갭 설정 (작게 유지)
+            const containerGap = `${Math.max(2, Math.min(6, Math.round(4 * scale)))}px`;
+            this.contentContainer.style.gap = containerGap;
+
+            // 버튼 컨테이너 갭 설정
+            const buttonContainerGap = `${Math.max(2, Math.min(5, Math.round(4 * scale)))}px`;
+            const buttonContainers = this.panel.querySelectorAll('.button-container, .extra-button-container');
+            buttonContainers.forEach(container => {
+                container.style.gap = buttonContainerGap;
+                container.style.marginBottom = '0';
+            });
+
+            // 패널 크기가 작을 때 우선순위가 낮은 요소 처리
+            if (height < 220) {
+                // 크기가 작을 때는 테이블이 우선 가려지도록 함
+                const infoTable = this.panel.querySelector('.info-table');
+                if (infoTable) {
+                    infoTable.style.display = height < 180 ? 'none' : 'table';
+                }
+            } else {
+                // 크기가 충분히 클 때는 모든 요소 표시
+                const infoTable = this.panel.querySelector('.info-table');
+                if (infoTable) {
+                    infoTable.style.display = 'table';
+                }
+            }
+
+            // 하단 버튼은 항상 표시되도록 fixed 처리
+            const extraButtonContainer = this.panel.querySelector('.extra-button-container');
+            if (extraButtonContainer) {
+                extraButtonContainer.style.marginBottom = '0';
+                extraButtonContainer.style.marginTop = `${Math.max(2, Math.min(6, Math.round(4 * scale)))}px`;
+                // 패널 위치에 맞게 위치 조정
+                const rect = this.panel.getBoundingClientRect();
+                extraButtonContainer.style.position = 'fixed';
+                extraButtonContainer.style.bottom = `${window.innerHeight - rect.bottom + 8}px`;
+                extraButtonContainer.style.left = `${rect.left + 8}px`;
+                extraButtonContainer.style.width = `${width - 16}px`;
+                extraButtonContainer.style.zIndex = '10002';
+                extraButtonContainer.style.background = COLORS.panelBg;
+            }
+
+            // 모든 스타일 저장
+            this.settings.save({
+                width: width + 'px',
+                height: height + 'px',
+                fontSize,
+                panelPadding,
+                headerMargin,
+                buttonPadding,
+                cellPadding,
+                selectPadding,
+                containerGap,
+                buttonContainerGap
+            });
+        }
+
+        updatePanelPosition(x, y) {
+            const maxX = window.innerWidth - this.panel.offsetWidth;
+            const maxY = window.innerHeight - this.panel.offsetHeight;
+
+            x = Math.max(0, Math.min(x, maxX));
+            y = Math.max(0, Math.min(y, maxY));
+
+            this.panel.style.left = x + 'px';
+            this.panel.style.top = y + 'px';
+
+            this.lastX = x;
+            this.lastY = y;
+        }
+
+        endDragResize() {
+            if (this.isDragging || this.isResizing) {
+                this.savePosition();
+                if (this.isDragging) {
+                    this.panel.style.transition = 'all 0.3s ease';
+                }
+            }
+            this.isDragging = false;
+            this.isResizing = false;
+
+            if (this.animationFrameId) {
+                cancelAnimationFrame(this.animationFrameId);
+                this.animationFrameId = null;
+            }
+        }
+
+        togglePanel() {
+            this.isPanelCollapsed = !this.isPanelCollapsed;
+            this.isPanelCollapsed ? this.collapsePanel() : this.expandPanel();
+            this.savePosition();
+        }
+
+        collapsePanel() {
+            this.contentContainer.style.display = 'none';
+            this.toggleBtn.textContent = '+';
+            this.panel.style.width = '60px';
+            this.panel.style.height = '30px';
+            this.panel.style.padding = '3px 8px';
+            this.panel.style.minWidth = '60px';
+            this.panel.style.minHeight = '30px';
+            this.panel.style.borderRadius = '15px';
+            this.header.style.margin = '0';
+            this.header.style.height = '24px';
+            this.header.style.justifyContent = 'flex-end';
+            this.header.style.alignItems = 'center';
+            this.resizeHandle.style.display = 'none';
+        }
+
+        expandPanel() {
+            this.contentContainer.style.display = 'flex';
+            this.toggleBtn.textContent = '-';
+            this.panel.style.width = this.settings.get('width');
+            this.panel.style.height = this.settings.get('height');
+            this.panel.style.padding = `${this.settings.get('panelPadding')}px`;
+            this.panel.style.minWidth = '120px';
+            this.panel.style.minHeight = '150px';
+            this.panel.style.borderRadius = '16px';
+            this.header.style.marginBottom = `${this.settings.get('headerMargin')}px`;
+            this.header.style.justifyContent = 'flex-end';
+            this.header.style.alignItems = 'flex-start';
+            this.resizeHandle.style.display = 'block';
+
+            // 모든 스타일 적용
+            this.applyAllStyles();
+
+            // 하단 버튼 위치 조정
+            setTimeout(() => {
+                const extraButtonContainer = this.panel.querySelector('.extra-button-container');
+                if (extraButtonContainer) {
+                    const rect = this.panel.getBoundingClientRect();
+                    extraButtonContainer.style.bottom = `${window.innerHeight - rect.bottom + 8}px`;
+                    extraButtonContainer.style.left = `${rect.left + 8}px`;
+                    extraButtonContainer.style.width = `${parseFloat(this.panel.style.width) - 16}px`;
+                }
+            }, 10);
+        }
+
+        savePosition() {
+            this.settings.save({
+                top: this.panel.style.top,
+                left: this.panel.style.left,
+                width: this.panel.style.width,
+                height: this.isPanelCollapsed ? this.settings.get('height') : this.panel.style.height,
+                isCollapsed: this.isPanelCollapsed
+            });
+        }
+    }
+
+    // 댓글 분석기 클래스
+    class CommentAnalyzer {
+        static extractNumberFromComment() {
+            const tbody = document.querySelector('tbody');
+            if (!tbody) return null;
+
+            const firstRow = tbody.querySelector('tr');
+            if (!firstRow) return null;
+
+            const commentCell = firstRow.cells[1];
+            if (!commentCell) return null;
+
+            const commentText = commentCell.textContent.trim();
+
+            const patterns = [
+                /(?:물량|수량)\s*:?\s*(\d{1,3})(?:\s*(?:[eE][aA]|개|EA|ea|Ea|eA))?/i,
+                /\b(\d{1,3})\s*(?:[eE][aA]|개|EA|ea|Ea|eA)\b/i,
+                /\b(\d{1,3})\b/
+            ];
+
+            for (const pattern of patterns) {
+                const matches = commentText.match(pattern);
+                if (matches && matches[1]) {
+                    return matches[1];
+                }
+            }
+
+            return null;
+        }
+
+        static extractTableInfo() {
+            const result = { code: '', author: '' };
+
+            const iprElement = document.querySelector('#ipr');
+            if (iprElement) {
+                result.code = iprElement.value || iprElement.textContent.trim();
+            }
+
+            const codeElement = document.querySelector('#code');
+            if (codeElement) {
+                result.author = codeElement.value || codeElement.textContent.trim();
+            }
+
+            return result;
+        }
+    }
+
+    // 버튼 액션 관리 클래스
+    class ButtonActions {
+        constructor(refreshCallback) {
+            this.refreshCallback = refreshCallback;
+        }
+
+        async searchClipboard(button) {
+            try {
+                const text = await navigator.clipboard.readText();
+                if (text?.trim()) {
+                    this.setButtonState(button, 'process', "검색 중...");
+
+                    setTimeout(() => {
+                        const found = window.find(text, false, false, true, false, true, false);
+                        this.setButtonState(button, found ? 'success' : 'error');
+                        setTimeout(() => this.setButtonState(button, 'normal'), 1000);
+                    }, 100);
+                }
+            } catch (err) {
+                console.error('클립보드 접근 오류:', err);
+                this.setButtonState(button, 'error');
+                setTimeout(() => this.setButtonState(button, 'normal'), 1000);
+            }
+        }
+
+        refreshData(button) {
+            this.setButtonState(button, 'process', "새로고침 중...");
+            setTimeout(() => window.location.reload(), 300);
+        }
+
+        pasteToComment(text) {
+            const commentInput = document.querySelector('#붙여넣기');
+            if (commentInput) {
+                commentInput.value = text;
+                commentInput.focus();
+            }
+        }
+
+        saveComment(callback) {
+            const saveButton = document.querySelector('#저장');
+            if (saveButton) {
+                saveButton.click();
+                if (callback) setTimeout(callback, 500);
+            }
+        }
+
+        inspectComment(text) {
+            console.log("검수 기능 실행:", text);
+            alert("검수 완료: " + text);
+        }
+
+        setButtonState(button, state, text = null) {
+            const originalText = button.dataset.originalText || button.textContent;
+
+            if (!button.dataset.originalText) {
+                button.dataset.originalText = originalText;
+            }
+
+            button.textContent = text || button.dataset.originalText;
+
+            const stateColors = {
+                normal: COLORS.neutral,
+                process: COLORS.primary,
+                success: COLORS.success,
+                error: COLORS.danger
+            };
+
+            button.style.backgroundColor = stateColors[state] || COLORS.neutral;
+        }
+    }
+
+    // 메인 앱 클래스
+    class CommentHelperApp {
+        constructor() {
+            this.settingsManager = new SettingsManager('commentHelperSettings');
+            this.panel = new DraggablePanel(this.settingsManager);
+            this.actions = new ButtonActions(() => this.refreshData());
+            this.extractedNumber = "";
+
+            this.initUI();
+            this.fixedHeights(); // 고정 높이 적용
+            this.initEvents();
+            this.loadData();
+        }
+
+        initUI() {
+            this.select = UIFactory.createElement('select', 'select-box');
+            ["인계수량", "AGV수량", "불량수량", "검사수량"].forEach(text => {
+                const opt = document.createElement("option");
+                opt.value = text;
+                opt.textContent = text;
+                this.select.appendChild(opt);
+            });
+
+            this.labelContainer = UIFactory.createElement('div', 'label-container');
+            this.labelText = UIFactory.createElement('div', 'label-text', { contentEditable: true });
+            this.labelContainer.appendChild(this.labelText);
+
+            this.buttonContainer = UIFactory.createElement('div', 'button-container');
+            this.pasteBtn = UIFactory.createButton("붙여넣기", "button-paste");
+            this.inspectBtn = UIFactory.createButton("검수", "button-inspect");
+            this.saveBtn = UIFactory.createButton("저장", "button-save");
+
+            this.buttonContainer.appendChild(this.pasteBtn);
+            this.buttonContainer.appendChild(this.inspectBtn);
+            this.buttonContainer.appendChild(this.saveBtn);
+
+            this.infoTable = UIFactory.createElement('table', 'info-table');
+
+            // 코드 행 추가 및 스타일 적용
+            const codeRow = this.infoTable.insertRow();
+            this.codeLabelCell = codeRow.insertCell();
+            this.codeLabelCell.className = 'table-cell table-cell-label';
+            this.codeLabelCell.textContent = "ipr 코드";
+            this.codeLabelCell.style.lineHeight = '1.8';
+            this.codeLabelCell.style.height = '28px';
+            this.codeLabelCell.style.width = '1px'; // 내용에 맞는 최소 너비
+
+            this.codeValueCell = codeRow.insertCell();
+            this.codeValueCell.className = 'table-cell';
+            this.codeValueCell.style.lineHeight = '1.8';
+            this.codeValueCell.style.height = '28px';
+
+            // 상품번호 행 추가 및 스타일 적용
+            const authorRow = this.infoTable.insertRow();
+            this.authorLabelCell = authorRow.insertCell();
+            this.authorLabelCell.className = 'table-cell table-cell-label';
+            this.authorLabelCell.textContent = "상품번호";
+            this.authorLabelCell.style.lineHeight = '1.8';
+            this.authorLabelCell.style.height = '28px';
+            this.authorLabelCell.style.width = '1px'; // 내용에 맞는 최소 너비
+
+            this.authorValueCell = authorRow.insertCell();
+            this.authorValueCell.className = 'table-cell table-cell-value';
+            this.authorValueCell.style.lineHeight = '1.8';
+            this.authorValueCell.style.height = '28px';
+
+            this.extraButtonContainer = UIFactory.createElement('div', 'extra-button-container');
+            this.clipboardBtn = UIFactory.createButton("찾기", "action-button");
+            this.refreshBtn = UIFactory.createButton("새로고침", "action-button");
+            this.topBtn = UIFactory.createButton("상단", "button-top");
+            this.bottomBtn = UIFactory.createButton("하단", "button-bottom");
+
+            this.extraButtonContainer.appendChild(this.clipboardBtn);
+            this.extraButtonContainer.appendChild(this.refreshBtn);
+            this.extraButtonContainer.appendChild(this.topBtn);
+            this.extraButtonContainer.appendChild(this.bottomBtn);
+
+            this.panel.contentContainer.appendChild(this.select);
+            this.panel.contentContainer.appendChild(this.labelContainer);
+            this.panel.contentContainer.appendChild(this.buttonContainer);
+            this.panel.contentContainer.appendChild(this.infoTable);
+            this.panel.contentContainer.appendChild(this.extraButtonContainer);
+        }
+
+        initEvents() {
+            this.select.addEventListener('change', () => this.updateLabel());
+
+            this.pasteBtn.addEventListener('click', () => {
+                this.actions.pasteToComment(this.labelText.textContent);
+            });
+
+            this.inspectBtn.addEventListener('click', () => {
+                this.actions.inspectComment(this.labelText.textContent);
+            });
+
+            this.saveBtn.addEventListener('click', () => {
+                this.actions.saveComment(() => this.refreshData());
+            });
+
+            this.clipboardBtn.addEventListener('click', () => {
+                this.actions.searchClipboard(this.clipboardBtn);
+            });
+
+            this.refreshBtn.addEventListener('click', () => {
+                this.actions.refreshData(this.refreshBtn);
+            });
+
+            this.topBtn.addEventListener('click', () => {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+
+            this.bottomBtn.addEventListener('click', () => {
+                window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+            });
+
+            this.labelContainer.addEventListener('click', () => {
+                this.labelText.focus();
+                this.labelText.style.whiteSpace = "normal";
+                this.labelText.style.overflow = "visible";
+                this.labelText.style.textOverflow = "clip";
+            });
+
+            this.labelText.addEventListener('blur', () => {
+                this.labelText.style.whiteSpace = "nowrap";
+                this.labelText.style.overflow = "hidden";
+                this.labelText.style.textOverflow = "ellipsis";
+            });
+        }
+
+        loadData() {
+            this.extractNumber();
+            this.loadTableInfo();
+        }
+
+        refreshData() {
+            this.extractNumber();
+            this.loadTableInfo();
+        }
+
+        extractNumber() {
+            const number = CommentAnalyzer.extractNumberFromComment();
+            if (number) {
+                this.extractedNumber = number;
+                this.updateLabel();
+            }
+        }
+
+        loadTableInfo() {
+            const info = CommentAnalyzer.extractTableInfo();
+            this.codeValueCell.textContent = info.code;
+            this.authorValueCell.textContent = info.author;
+        }
+
+        updateLabel() {
+            const prefix = this.select.value;
+            this.labelText.textContent = `${prefix} : ${this.extractedNumber} ea`;
+        }
+
+        // 고정 높이 적용 메서드
+        fixedHeights() {
+            // 셀렉트 박스 높이 고정
+            if (this.select) {
+                this.select.style.height = '32px';
+                this.select.style.flexShrink = '0';
+                this.select.style.boxSizing = 'border-box';
+            }
+
+            // 라벨 컨테이너 높이 고정
+            if (this.labelContainer) {
+                this.labelContainer.style.height = '32px';
+                this.labelContainer.style.flexShrink = '0';
+                this.labelContainer.style.boxSizing = 'border-box';
+            }
+
+            // 테이블 높이 고정 (축소)
+            if (this.infoTable) {
+                this.infoTable.style.height = '55px';
+                this.infoTable.style.flexShrink = '0';
+                this.infoTable.style.boxSizing = 'border-box';
+                this.infoTable.style.tableLayout = 'fixed'; // 테이블 레이아웃 고정
+            }
+
+            // 테이블 셀 높이 고정 (축소) 및 너비 조정
+            const labelCells = [this.codeLabelCell, this.authorLabelCell];
+            labelCells.forEach(cell => {
+                if (cell) {
+                    cell.style.height = '25px';
+                    cell.style.lineHeight = '1.4';
+                    cell.style.padding = '4px 4px';
+                    cell.style.boxSizing = 'border-box';
+                    cell.style.width = '1px'; // 내용에 맞는 최소 너비
+                    cell.style.whiteSpace = 'nowrap'; // 텍스트 줄바꿈 방지
+                }
+            });
+
+            const valueCells = [this.codeValueCell, this.authorValueCell];
+            valueCells.forEach(cell => {
+                if (cell) {
+                    cell.style.height = '25px';
+                    cell.style.lineHeight = '1.4';
+                    cell.style.padding = '4px 4px';
+                    cell.style.boxSizing = 'border-box';
+                    cell.style.whiteSpace = 'nowrap'; // 텍스트 줄바꿈 방지
+                    cell.style.overflow = 'hidden';
+                    cell.style.textOverflow = 'ellipsis'; // 넘치는 텍스트는 ... 처리
+                }
+            });
+
+            // 스크롤 설정
+            if (this.panel && this.panel.contentContainer) {
+                this.panel.contentContainer.style.overflow = 'auto';
+                this.panel.contentContainer.style.paddingBottom = '34px'; // 하단 버튼 공간 확보
+            }
+
+            // 하단 버튼 위치 조정
+            const extraButtonContainer = this.panel.querySelector('.extra-button-container');
+            if (extraButtonContainer) {
+                const rect = this.panel.getBoundingClientRect();
+                extraButtonContainer.style.position = 'fixed';
+                extraButtonContainer.style.bottom = `${window.innerHeight - rect.bottom + 8}px`;
+                extraButtonContainer.style.left = `${rect.left + 8}px`;
+                extraButtonContainer.style.width = `${rect.width - 16}px`;
+                extraButtonContainer.style.zIndex = '10002';
+            }
+        }
+    }
+
+    // 앱 초기화 및 실행
+    new CommentHelperApp();
+})(); 
