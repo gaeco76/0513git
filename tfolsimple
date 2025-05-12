@@ -168,7 +168,7 @@
             height: 55px; /* 테이블 높이 축소 */
             position: relative;
             z-index: 10; /* 낮은 z-index */
-            table-layout: fixed; /* 고정 레이아웃으로 설정 */
+            table-layout: fixed; /* 테이블 레이아웃 고정 */
         }
 
         .table-cell {
@@ -180,16 +180,21 @@
 
         .table-cell-label {
             font-weight: bold;
-            width: 1%; /* 내용에 맞게 최소 너비로 설정 */
+            width: 70px; /* 고정 너비로 변경 */
+            min-width: 70px; /* 최소 너비도 설정 */
+            max-width: 70px; /* 최대 너비도 설정 */
             white-space: nowrap; /* 텍스트 줄바꿈 방지 */
+            overflow: hidden; /* 넘치는 내용 숨김 */
+            text-overflow: ellipsis; /* 넘치는 경우 ... 표시 */
             border-right: 1px solid ${COLORS.border};
+            padding: 4px 4px; /* 패딩 최소화 */
         }
 
         .table-cell-value {
             border-top: 1px solid ${COLORS.border};
-            white-space: nowrap; /* 텍스트 줄바꿈 방지 */
-            overflow: hidden;
-            text-overflow: ellipsis; /* 넘치는 텍스트는 ... 처리 */
+            width: auto; /* 나머지 공간 차지 */
+            overflow: hidden; /* 넘치는 내용 숨김 */
+            text-overflow: ellipsis; /* 넘치는 경우 ... 표시 */
         }
 
         .extra-button-container {
@@ -764,34 +769,37 @@
             this.buttonContainer.appendChild(this.saveBtn);
 
             this.infoTable = UIFactory.createElement('table', 'info-table');
-
-            // 코드 행 추가 및 스타일 적용
             const codeRow = this.infoTable.insertRow();
             this.codeLabelCell = codeRow.insertCell();
             this.codeLabelCell.className = 'table-cell table-cell-label';
             this.codeLabelCell.textContent = "ipr 코드";
             this.codeLabelCell.style.lineHeight = '1.8';
             this.codeLabelCell.style.height = '28px';
-            this.codeLabelCell.style.width = '1px'; // 내용에 맞는 최소 너비
+            this.codeLabelCell.style.width = '70px'; /* 고정 너비 추가 */
+            this.codeLabelCell.style.minWidth = '70px'; /* 최소 너비 추가 */
+            this.codeLabelCell.style.maxWidth = '70px'; /* 최대 너비 추가 */
 
             this.codeValueCell = codeRow.insertCell();
             this.codeValueCell.className = 'table-cell';
             this.codeValueCell.style.lineHeight = '1.8';
             this.codeValueCell.style.height = '28px';
+            this.codeValueCell.style.width = 'auto'; /* 나머지 공간 자동 차지 */
 
-            // 상품번호 행 추가 및 스타일 적용
             const authorRow = this.infoTable.insertRow();
             this.authorLabelCell = authorRow.insertCell();
             this.authorLabelCell.className = 'table-cell table-cell-label';
             this.authorLabelCell.textContent = "상품번호";
             this.authorLabelCell.style.lineHeight = '1.8';
             this.authorLabelCell.style.height = '28px';
-            this.authorLabelCell.style.width = '1px'; // 내용에 맞는 최소 너비
+            this.authorLabelCell.style.width = '70px'; /* 고정 너비 추가 */
+            this.authorLabelCell.style.minWidth = '70px'; /* 최소 너비 추가 */
+            this.authorLabelCell.style.maxWidth = '70px'; /* 최대 너비 추가 */
 
             this.authorValueCell = authorRow.insertCell();
             this.authorValueCell.className = 'table-cell table-cell-value';
             this.authorValueCell.style.lineHeight = '1.8';
             this.authorValueCell.style.height = '28px';
+            this.authorValueCell.style.width = 'auto'; /* 나머지 공간 자동 차지 */
 
             this.extraButtonContainer = UIFactory.createElement('div', 'extra-button-container');
             this.clipboardBtn = UIFactory.createButton("찾기", "action-button");
@@ -906,32 +914,16 @@
                 this.infoTable.style.height = '55px';
                 this.infoTable.style.flexShrink = '0';
                 this.infoTable.style.boxSizing = 'border-box';
-                this.infoTable.style.tableLayout = 'fixed'; // 테이블 레이아웃 고정
             }
 
-            // 테이블 셀 높이 고정 (축소) 및 너비 조정
-            const labelCells = [this.codeLabelCell, this.authorLabelCell];
-            labelCells.forEach(cell => {
+            // 테이블 셀 높이 고정 (축소)
+            const cells = [this.codeLabelCell, this.codeValueCell, this.authorLabelCell, this.authorValueCell];
+            cells.forEach(cell => {
                 if (cell) {
                     cell.style.height = '25px';
                     cell.style.lineHeight = '1.4';
                     cell.style.padding = '4px 4px';
                     cell.style.boxSizing = 'border-box';
-                    cell.style.width = '1px'; // 내용에 맞는 최소 너비
-                    cell.style.whiteSpace = 'nowrap'; // 텍스트 줄바꿈 방지
-                }
-            });
-
-            const valueCells = [this.codeValueCell, this.authorValueCell];
-            valueCells.forEach(cell => {
-                if (cell) {
-                    cell.style.height = '25px';
-                    cell.style.lineHeight = '1.4';
-                    cell.style.padding = '4px 4px';
-                    cell.style.boxSizing = 'border-box';
-                    cell.style.whiteSpace = 'nowrap'; // 텍스트 줄바꿈 방지
-                    cell.style.overflow = 'hidden';
-                    cell.style.textOverflow = 'ellipsis'; // 넘치는 텍스트는 ... 처리
                 }
             });
 
@@ -951,6 +943,36 @@
                 extraButtonContainer.style.width = `${rect.width - 16}px`;
                 extraButtonContainer.style.zIndex = '10002';
             }
+
+            // 테이블 셀 너비 고정 (ipr 코드, 상품번호)
+            if (this.infoTable) {
+                this.infoTable.style.tableLayout = 'fixed'; // 테이블 레이아웃 고정
+            }
+
+            // 레이블 셀(ipr 코드, 상품번호) 너비 고정
+            const labelCells = [this.codeLabelCell, this.authorLabelCell];
+            labelCells.forEach(cell => {
+                if (cell) {
+                    cell.style.width = '70px';
+                    cell.style.minWidth = '70px';
+                    cell.style.maxWidth = '70px';
+                    cell.style.whiteSpace = 'nowrap';
+                    cell.style.overflow = 'hidden';
+                    cell.style.textOverflow = 'ellipsis';
+                    cell.style.padding = '4px';
+                }
+            });
+
+            // 값 셀 자동 너비
+            const valueCells = [this.codeValueCell, this.authorValueCell];
+            valueCells.forEach(cell => {
+                if (cell) {
+                    cell.style.width = 'auto';
+                    cell.style.overflow = 'hidden';
+                    cell.style.textOverflow = 'ellipsis';
+                    cell.style.padding = '4px';
+                }
+            });
         }
     }
 
