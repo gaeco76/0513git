@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>테이블 예제</title>
+    <style>
+        body {
+            font-family: 'Malgun Gothic', sans-serif;
+            margin: 0;
+            padding: 60px 20px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .table-container {
+            width: 800px;
+            margin: 0 auto 30px;
+        }
+
+        table {
+            width: 100%;
+            table-layout: fixed;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            width: 33.33%;
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+
+        caption {
+            font-size: 1.2em;
+            font-weight: bold;
+            margin-bottom: 10px;
+            text-align: left;
+        }
+
+        .page-title {
+            margin-top: 0;
+            margin-bottom: 40px;
+            color: #333;
+            text-align: center;
+            width: 100%;
+        }
+
+        td.editable {
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        td.editable:hover {
+            background-color: #f5f5f5;
+        }
+
+        td.editing {
+            padding: 0;
+        }
+
+        td.editing input {
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+            padding: 8px;
+            border: none;
+            outline: 2px solid #4285f4;
+            text-align: center;
+            font-family: 'Malgun Gothic', sans-serif;
+            font-size: 1em;
+        }
+
+        .info-text {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #555;
+            font-size: 0.9em;
+        }
+
+        /* 저장 효과 애니메이션 */
+        @keyframes saveEffect {
+            0% {
+                background-color: #e6f7ff;
+            }
+
+            100% {
+                background-color: transparent;
+            }
+        }
+
+        td.saved {
+            animation: saveEffect 1.5s ease-out;
+        }
+    </style>
+</head>
+
+<body>
+    <h1 class="page-title">테이블 목록</h1>
+    <p class="info-text">셀을 클릭하여 내용을 직접 수정할 수 있습니다. 수정 후 Enter 키를 누르거나 다른 곳을 클릭하면 자동으로 저장됩니다.</p>
+
+    <!-- 1. 상품 입고 기간 관련 테이블 -->
+    <div class="table-container">
+        <table>
+            <caption>상품 입고 기간 관련 테이블</caption>
+            <thead>
+                <tr>
+                    <th>입고 날짜</th>
+                    <th>상품명</th>
+                    <th>입고 수량</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="editable">2023-05-01</td>
+                    <td class="editable">노트북</td>
+                    <td class="editable">50</td>
+                </tr>
+                <tr>
+                    <td class="editable">2023-05-15</td>
+                    <td class="editable">스마트폰</td>
+                    <td class="editable">100</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- 2. 상품 내역 관련 테이블 -->
+    <div class="table-container">
+        <table>
+            <caption>상품 내역 관련 테이블</caption>
+            <thead>
+                <tr>
+                    <th>상품명</th>
+                    <th>가격</th>
+                    <th>재고</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="editable">노트북</td>
+                    <td class="editable">1,200,000원</td>
+                    <td class="editable">45</td>
+                </tr>
+                <tr>
+                    <td class="editable">스마트폰</td>
+                    <td class="editable">800,000원</td>
+                    <td class="editable">78</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- 3. 상품 코드 관련 테이블 -->
+    <div class="table-container">
+        <table>
+            <caption>상품 코드 관련 테이블</caption>
+            <thead>
+                <tr>
+                    <th>상품 코드</th>
+                    <th>상품명</th>
+                    <th>분류</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="editable">A001</td>
+                    <td class="editable">노트북</td>
+                    <td class="editable">전자제품</td>
+                </tr>
+                <tr>
+                    <td class="editable">B002</td>
+                    <td class="editable">스마트폰</td>
+                    <td class="editable">모바일</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- 4. 관련 내역 테이블 -->
+    <div class="table-container">
+        <table>
+            <caption>관련 내역 테이블</caption>
+            <thead>
+                <tr>
+                    <th>담당자</th>
+                    <th>처리 상태</th>
+                    <th>처리 날짜</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="editable">김철수</td>
+                    <td class="editable">입고 완료</td>
+                    <td class="editable">2023-05-02</td>
+                </tr>
+                <tr>
+                    <td class="editable">이영희</td>
+                    <td class="editable">배송 중</td>
+                    <td class="editable">2023-05-16</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // 셀 클릭 시 편집 모드로 전환
+            document.querySelectorAll('td.editable').forEach(cell => {
+                // 원래 값 저장
+                cell.setAttribute('data-original', cell.textContent.trim());
+
+                cell.addEventListener('click', function () {
+                    if (this.classList.contains('editing')) return;
+
+                    const value = this.textContent;
+                    this.classList.add('editing');
+                    this.innerHTML = `<input type="text" value="${value}" />`;
+                    const input = this.querySelector('input');
+                    input.focus();
+                    input.setSelectionRange(0, input.value.length);
+
+                    // Enter 키 누르면 편집 완료
+                    input.addEventListener('keydown', function (e) {
+                        if (e.key === 'Enter') {
+                            finishEditing(cell, input);
+                        }
+                    });
+
+                    // 포커스 잃으면 편집 완료
+                    input.addEventListener('blur', function () {
+                        finishEditing(cell, input);
+                    });
+                });
+            });
+
+            // 편집 완료 함수
+            function finishEditing(cell, input) {
+                const newValue = input.value.trim();
+                const originalValue = cell.getAttribute('data-original');
+
+                cell.classList.remove('editing');
+                cell.textContent = newValue;
+
+                // 값이 변경되었으면 저장 효과 표시
+                if (newValue !== originalValue) {
+                    saveData(cell, newValue);
+
+                    // 저장 효과 애니메이션
+                    cell.classList.add('saved');
+                    setTimeout(() => {
+                        cell.classList.remove('saved');
+                    }, 1500);
+
+                    // 새 값을 원래 값으로 업데이트
+                    cell.setAttribute('data-original', newValue);
+                }
+            }
+
+            // 데이터 저장 함수 (실제 서버 저장 로직이 들어갈 부분)
+            function saveData(cell, value) {
+                // 실제 구현에서는 여기에 API 호출이나 로컬 스토리지 저장 등의 코드가 들어갈 수 있음
+                // 여기서는 콘솔에 로그만 출력
+                console.log('데이터 저장:', {
+                    테이블: cell.closest('table').querySelector('caption').textContent,
+                    행: Array.from(cell.parentNode.parentNode.children).indexOf(cell.parentNode),
+                    열: Array.from(cell.parentNode.children).indexOf(cell),
+                    변경값: value
+                });
+
+                // 로컬 스토리지에 저장 예시
+                const tableId = cell.closest('table').querySelector('caption').textContent;
+                const rowIndex = Array.from(cell.parentNode.parentNode.children).indexOf(cell.parentNode);
+                const colIndex = Array.from(cell.parentNode.children).indexOf(cell);
+
+                // 로컬 스토리지에서 기존 데이터 가져오기
+                let tableData = JSON.parse(localStorage.getItem('tableData')) || {};
+
+                // 테이블이 없으면 생성
+                if (!tableData[tableId]) {
+                    tableData[tableId] = {};
+                }
+
+                // 행이 없으면 생성
+                if (!tableData[tableId][rowIndex]) {
+                    tableData[tableId][rowIndex] = {};
+                }
+
+                // 값 저장
+                tableData[tableId][rowIndex][colIndex] = value;
+
+                // 로컬 스토리지에 저장
+                localStorage.setItem('tableData', JSON.stringify(tableData));
+            }
+
+            // 페이지 로드 시 저장된 데이터 불러오기
+            function loadSavedData() {
+                const tableData = JSON.parse(localStorage.getItem('tableData'));
+                if (!tableData) return;
+
+                document.querySelectorAll('table').forEach((table, tableIndex) => {
+                    const tableId = table.querySelector('caption').textContent;
+                    if (!tableData[tableId]) return;
+
+                    const rows = table.querySelectorAll('tbody tr');
+                    Object.keys(tableData[tableId]).forEach(rowIndex => {
+                        if (!rows[rowIndex]) return;
+
+                        const cells = rows[rowIndex].querySelectorAll('td');
+                        Object.keys(tableData[tableId][rowIndex]).forEach(colIndex => {
+                            if (!cells[colIndex]) return;
+
+                            const value = tableData[tableId][rowIndex][colIndex];
+                            cells[colIndex].textContent = value;
+                            cells[colIndex].setAttribute('data-original', value);
+                        });
+                    });
+                });
+            }
+
+            // 저장된 데이터 불러오기
+            loadSavedData();
+        });
+    </script>
+</body>
+
+</html>

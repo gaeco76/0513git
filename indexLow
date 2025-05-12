@@ -1,0 +1,256 @@
+// ==UserScript==
+// @name         간편 토글 자동화 패널
+// @namespace    http://tampermonkey.net/
+// @version      0.2
+// @description  깔끔한 아이폰 스타일 토글 버튼과 드래그 가능한 패널
+// @author       You
+// @match        *://**/*
+// @grant        GM_setValue
+// @grant        GM_getValue
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // 현재 URL이 index.html 페이지인지 확인
+    const isIndexPage = window.location.pathname.includes('index.html');
+    if (!isIndexPage) return;
+
+    // 상수 정의
+    const COLORS = {
+        ACTIVE: '#4CD964',
+        INACTIVE: '#e9e9ea',
+        TEXT_ACTIVE: 'white',
+        TEXT_INACTIVE: '#888'
+    };
+    
+    const TOGGLE_SETTINGS = {
+        main: {
+            id: 'main',
+            key: 'panelActive',
+            defaultValue: true,
+            activate: activateAutomation,
+            deactivate: deactivateAutomation
+        },
+        second: {
+            id: 'second',
+            key: 'secondPanelActive',
+            defaultValue: false,
+            activate: activateSecondAutomation,
+            deactivate: deactivateSecondAutomation
+        }
+    };
+
+    // 상태 관리
+    const state = {
+        toggles: {},
+        panelPosition: GM_getValue('panelPosition', { x: 20, y: 20 }),
+        intervals: {},
+        isDragging: false,
+        dragOffset: { x: 0, y: 0 }
+    };
+
+    // 토글 상태 초기화
+    Object.keys(TOGGLE_SETTINGS).forEach(key => {
+        const setting = TOGGLE_SETTINGS[key];
+        state.toggles[key] = GM_getValue(setting.key, setting.defaultValue);
+        state.intervals[key] = null;
+    });
+
+    // 패널 생성
+    const panel = createPanel();
+    document.body.appendChild(panel);
+
+    // 패널에 토글 추가
+    Object.keys(TOGGLE_SETTINGS).forEach(key => {
+        const { switchElement } = createToggleSwitch(key);
+        panel.appendChild(switchElement);
+    });
+
+    // 드래그 이벤트 설정
+    setupDragEvents();
+
+    // 페이지 로드 시 저장된 상태에 따라 자동화 기능 활성화
+    Object.keys(TOGGLE_SETTINGS).forEach(key => {
+        if (state.toggles[key]) {
+            TOGGLE_SETTINGS[key].activate();
+        }
+    });
+
+    // 패널 생성 함수
+    function createPanel() {
+        const panel = document.createElement('div');
+        panel.style.cssText = `
+            position: fixed;
+            z-index: 9999;
+            background-color: rgba(255, 255, 255, 0.9);
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 6px 20px 6px 8px;
+            width: 42px;
+            top: ${state.panelPosition.y}px;
+            left: ${state.panelPosition.x}px;
+            cursor: move;
+            user-select: none;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            justify-content: center;
+            gap: 8px;
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(0,0,0,0.1);
+        `;
+        return panel;
+    }
+
+    // 토글 스위치 생성 함수
+    function createToggleSwitch(id) {
+        const isActive = state.toggles[id];
+        
+        // 토글 스위치 생성
+        const toggleSwitch = document.createElement('div');
+        toggleSwitch.setAttribute('data-toggle-id', id);
+        toggleSwitch.style.cssText = `
+            position: relative;
+            width: 36px;
+            height: 22px;
+            background-color: ${isActive ? COLORS.ACTIVE : COLORS.INACTIVE};
+            border-radius: 11px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        `;
+
+        // 토글 스위치 원형 노브
+        const toggleKnob = document.createElement('div');
+        toggleKnob.style.cssText = `
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            background-color: white;
+            border-radius: 50%;
+            top: 2px;
+            left: ${isActive ? '16px' : '2px'};
+            transition: all 0.3s ease;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        `;
+        toggleSwitch.appendChild(toggleKnob);
+
+        // 토글 클릭 이벤트
+        toggleSwitch.addEventListener('click', () => handleToggleClick(id, toggleSwitch, toggleKnob));
+        
+        return {
+            switchElement: toggleSwitch,
+            elements: { toggleSwitch, toggleKnob }
+        };
+    }
+
+    // 토글 클릭 핸들러
+    function handleToggleClick(id, toggleSwitch, toggleKnob) {
+        state.toggles[id] = !state.toggles[id];
+        updateToggleState(id, toggleSwitch, toggleKnob);
+        
+        if (state.toggles[id]) {
+            TOGGLE_SETTINGS[id].activate();
+        } else {
+            TOGGLE_SETTINGS[id].deactivate();
+        }
+        
+        GM_setValue(TOGGLE_SETTINGS[id].key, state.toggles[id]);
+    }
+
+    // 토글 상태 업데이트
+    function updateToggleState(id, toggleSwitch, toggleKnob) {
+        const isActive = state.toggles[id];
+        toggleSwitch.style.backgroundColor = isActive ? COLORS.ACTIVE : COLORS.INACTIVE;
+        toggleKnob.style.left = isActive ? '16px' : '2px';
+    }
+
+    // 드래그 이벤트 설정
+    function setupDragEvents() {
+        panel.addEventListener('mousedown', (e) => {
+            // 토글 스위치 클릭 시 드래그 시작 방지
+            if (e.target.closest('[data-toggle-id]')) {
+                return;
+            }
+            
+            state.isDragging = true;
+            state.dragOffset.x = e.clientX - panel.offsetLeft;
+            state.dragOffset.y = e.clientY - panel.offsetTop;
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!state.isDragging) return;
+
+            // 브라우저 범위 내에서만 이동하도록 제한
+            let newX = e.clientX - state.dragOffset.x;
+            let newY = e.clientY - state.dragOffset.y;
+
+            // 화면 경계 체크
+            const maxX = window.innerWidth - panel.offsetWidth;
+            const maxY = window.innerHeight - panel.offsetHeight;
+
+            newX = Math.max(0, Math.min(newX, maxX));
+            newY = Math.max(0, Math.min(newY, maxY));
+
+            panel.style.left = newX + 'px';
+            panel.style.top = newY + 'px';
+
+            // 위치 저장
+            state.panelPosition.x = newX;
+            state.panelPosition.y = newY;
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (state.isDragging) {
+                state.isDragging = false;
+                // 위치 저장
+                GM_setValue('panelPosition', state.panelPosition);
+            }
+        });
+    }
+
+    // 자동화 기능 활성화
+    function activateAutomation() {
+        if (state.intervals.main) return; // 이미 활성화된 경우
+
+        state.intervals.main = setInterval(() => {
+            // 입력창 포커스 및 선택
+            const commentInput = document.getElementById('commentInput');
+            if (commentInput) {
+                commentInput.focus();
+                commentInput.select();
+            }
+
+            // 페이지 하단으로 스크롤
+            window.scrollTo(0, document.body.scrollHeight);
+        }, 2000);
+    }
+
+    // 자동화 기능 비활성화
+    function deactivateAutomation() {
+        if (state.intervals.main) {
+            clearInterval(state.intervals.main);
+            state.intervals.main = null;
+        }
+    }
+
+    // 두 번째 자동화 기능 활성화 (현장에서 구현)
+    function activateSecondAutomation() {
+        if (state.intervals.second) return; // 이미 활성화된 경우
+
+        state.intervals.second = setInterval(() => {
+            // 여기에 두 번째 토글의 자동화 기능 구현
+            console.log('두 번째 토글 기능 활성화됨');
+            
+            // 현장에서 필요한 동작 구현
+        }, 2000);
+    }
+
+    // 두 번째 자동화 기능 비활성화
+    function deactivateSecondAutomation() {
+        if (state.intervals.second) {
+            clearInterval(state.intervals.second);
+            state.intervals.second = null;
+        }
+    }
+})();
