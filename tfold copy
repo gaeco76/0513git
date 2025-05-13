@@ -1,0 +1,653 @@
+// ==UserScript==
+// @name         utility
+// @namespace    http://tampermonkey.net/
+// @version      0.3
+// @description  util
+// @match        *://*/*
+// @grant        none
+// @author       댓글도우미
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // --- 상수 정의 --- //
+    // UI 요소 및 상태 표시에 사용될 색상 값
+    const COLORS = {
+        primary: '#2196F3',     // 주요 액션, 프로세스 진행 중
+        success: '#4CAF50',     // 성공 상태
+        danger: '#f44336',      // 오류 상태
+        neutral: '#607D8B',     // 일반 버튼 배경
+        panelBg: '#f9f9f9',     // 패널 배경
+        tableBg: '#f0f0f0',     // 테이블 배경
+        border: '#ccc',         // 테두리 색상
+        white: '#fff',          // 흰색
+        lightGray: '#ddd',      // 밝은 회색 (토글 버튼 등)
+        transparent: 'transparent' // 투명
+    };
+
+    // 스크립트의 기본 설정을 정의하는 객체
+    const DEFAULT_SETTINGS = {
+        top: '20%',              // 패널의 기본 상단 위치
+        left: '20%',             // 패널의 기본 왼쪽 위치
+        width: '200px',          // 패널의 기본 너비
+        height: 'auto',          // 패널의 기본 높이 (내용에 따라 자동 조절)
+        isCollapsed: false,      // 패널 초기 접힘 상태
+        customBtn1Text: '사용자 정의 1', // 사용자 정의 버튼 1의 기본 텍스트
+        customBtn2Text: '사용자 정의 2'  // 사용자 정의 버튼 2의 기본 텍스트
+    };
+
+    // 로컬 스토리지에 설정을 저장할 때 사용되는 키
+    const STORAGE_KEY = 'commentHelperSettings_v2';
+
+    // --- 설정 관리 클래스 --- //
+    // 스크립트 설정을 로컬 스토리지에서 불러오고 저장하는 역할
+    class SettingsManager {
+        constructor(storageKey) {
+            this.storageKey = storageKey; // 로컬 스토리지 키
+            this.settings = this._load();   // 설정 초기화
+        }
+
+        // 로컬 스토리지에서 설정을 불러오는 내부 메서드
+        _load() {
+            try {
+                const storedSettings = localStorage.getItem(this.storageKey);
+                // 저장된 설정이 있으면 기본값과 병합, 없으면 기본값 사용
+                return {...DEFAULT_SETTINGS, ...(storedSettings ? JSON.parse(storedSettings) : {})};
+            } catch (e) {
+                console.error('설정 로드 오류:', e);
+                return {...DEFAULT_SETTINGS}; // 오류 발생 시 기본 설정 반환
+            }
+        }
+
+        // 새로운 설정을 저장하는 메서드
+        save(newSettings) {
+            this.settings = {...this.settings, ...newSettings}; // 기존 설정에 새 설정 병합
+            localStorage.setItem(this.storageKey, JSON.stringify(this.settings)); // 로컬 스토리지에 저장
+        }
+
+        // 특정 설정 값을 가져오는 메서드
+        get(key) {
+            return this.settings[key];
+        }
+    }
+
+    // --- UI 유틸리티 클래스 --- //
+    // DOM 요소 생성 및 관리를 위한 헬퍼 메서드 제공
+    class DOMHelper {
+        // 지정된 태그, 스타일, 속성, 텍스트/HTML 내용, 자식 요소를 가진 DOM 요소를 생성
+        static createElement(tag, options = {}) {
+            const element = document.createElement(tag);
+            const { style = {}, attributes = {}, text, html, children = [] } = options;
+
+            // 스타일 적용
+            Object.entries(style).forEach(([prop, value]) => element.style[prop] = value);
+            // 속성 적용
+            Object.entries(attributes).forEach(([prop, value]) => element[prop] = value);
+
+            if (text) element.textContent = text; // 텍스트 내용 설정
+            if (html) element.innerHTML = html;   // HTML 내용 설정
+
+            // 자식 요소 추가
+            children.forEach(child => element.appendChild(child));
+            return element;
+        }
+
+        // 기본 스타일과 추가 스타일을 적용한 버튼 요소를 생성
+        static createButton(text, baseStyle = {}, additionalStyle = {}) {
+            const style = {
+                flex: '1', // Flex 아이템 비율
+                padding: '8px 4px',
+                borderRadius: '8px',
+                border: 'none',
+                backgroundColor: COLORS.neutral, // 기본 배경색
+                color: COLORS.white,            // 기본 글자색
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 'bold',
+                transition: 'background-color 0.2s', // 부드러운 색상 변경 효과
+                ...baseStyle,
+                ...additionalStyle
+            };
+            return this.createElement('button', { style, text });
+        }
+    }
+
+    // --- 드래그 가능한 패널 클래스 --- //
+    // 사용자가 드래그하여 위치를 옮기거나 크기를 조절할 수 있는 패널 UI를 관리
+    class DraggablePanel {
+        constructor(settingsManager) {
+            this.settings = settingsManager; // 설정 관리자 인스턴스
+            // 패널의 현재 상태 (접힘, 드래그 중, 리사이징 중 등) 관리
+            this.state = {
+                isCollapsed: this.settings.get('isCollapsed'), // 초기 접힘 상태
+                isDragging: false,  // 현재 드래그 중인지 여부
+                isResizing: false,  // 현재 크기 조절 중인지 여부
+                offsetX: 0,       // 드래그 시작 시 마우스와 패널 좌측 상단 간의 X 오프셋
+                offsetY: 0,       // 드래그 시작 시 마우스와 패널 좌측 상단 간의 Y 오프셋
+                animationFrameId: null, // 마우스 이동 애니메이션 프레임 ID
+            };
+            this._createPanelElements(); // 패널 UI 요소 생성
+            this._initEventListeners();  // 이벤트 리스너 초기화
+            // 초기 패널 상태(접힘/펼침) 적용
+            this.state.isCollapsed ? this.collapse(false) : this.expand(false);
+        }
+
+        // 패널을 구성하는 DOM 요소들을 생성
+        _createPanelElements() {
+            // 메인 패널 요소
+            this.panel = DOMHelper.createElement('div', {
+                attributes: { id: 'draggablePanel' }, // 패널 ID
+                style: {
+                    position: 'fixed', top: this.settings.get('top'), left: this.settings.get('left'),
+                    width: this.settings.get('width'), height: this.settings.get('height'),
+                    padding: '12px', background: COLORS.panelBg, borderRadius: '16px',
+                    boxShadow: '0 0 10px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column',
+                    zIndex: '9999', overflow: 'auto', minWidth: '240px', minHeight: '300px',
+                    transition: 'all 0.3s ease'
+                }
+            });
+
+            // 패널 접기/펼치기 토글 버튼
+            this.toggleBtn = DOMHelper.createElement('button', {
+                text: this.state.isCollapsed ? '+' : '-', title: '접기/펼치기',
+                style: {
+                    width: '24px', height: '24px', borderRadius: '50%', border: 'none',
+                    background: COLORS.lightGray, cursor: 'pointer', textAlign: 'center',
+                    lineHeight: '22px', fontSize: '16px', padding: '0', transition: 'all 0.3s ease'
+                }
+            });
+
+            // 패널 헤더 (드래그 핸들 및 토글 버튼 포함)
+            this.header = DOMHelper.createElement('div', {
+                style: { cursor: 'move', display: 'flex', justifyContent: 'flex-end', marginBottom: '6px', height: '24px' },
+                children: [this.toggleBtn]
+            });
+
+            // 패널의 주 내용이 표시될 컨테이너
+            this.contentContainer = DOMHelper.createElement('div', {
+                style: { display: 'flex', flexDirection: 'column', width: '100%', gap: '6px' }
+            });
+
+            // 패널 크기 조절 핸들
+            this.resizeHandle = DOMHelper.createElement('div', {
+                style: {
+                    position: 'absolute', width: '16px', height: '16px', bottom: '3px', right: '3px',
+                    cursor: 'nwse-resize', zIndex: '10000', backgroundColor: COLORS.transparent,
+                    display: this.state.isCollapsed ? 'none' : 'block'
+                }
+            });
+
+            // 생성된 요소들을 패널에 추가하고 body에 패널 추가
+            this.panel.append(this.header, this.contentContainer, this.resizeHandle);
+            document.body.appendChild(this.panel);
+        }
+
+        // 패널의 드래그, 리사이징, 토글 관련 이벤트 리스너를 초기화
+        _initEventListeners() {
+            this.toggleBtn.addEventListener('click', () => this.togglePanel());
+            this.header.addEventListener('mousedown', e => this._startDragging(e));
+            this.resizeHandle.addEventListener('mousedown', e => this._startResizing(e));
+            document.addEventListener('mousemove', e => this._handleMouseMove(e));
+            document.addEventListener('mouseup', () => this._endDragResize());
+        }
+
+        // 패널 드래그 시작 처리
+        _startDragging(e) {
+            this.state.isDragging = true;
+            const rect = this.panel.getBoundingClientRect();
+            this.state.offsetX = e.clientX - rect.left;
+            this.state.offsetY = e.clientY - rect.top;
+            this.panel.style.transition = 'none'; // 드래그 중에는 transition 효과 제거
+            e.preventDefault();
+        }
+
+        // 패널 크기 조절 시작 처리
+        _startResizing(e) {
+            this.state.isResizing = true;
+            this.panel.style.transition = 'none'; // 크기 조절 중에는 transition 효과 제거
+            e.preventDefault();
+            e.stopPropagation(); // 이벤트 버블링 방지
+        }
+
+        // 마우스 이동에 따른 패널 위치 또는 크기 업데이트 (requestAnimationFrame 사용)
+        _handleMouseMove(e) {
+            if (this.state.isDragging) {
+                if (this.state.animationFrameId) cancelAnimationFrame(this.state.animationFrameId);
+                this.state.animationFrameId = requestAnimationFrame(() => {
+                    const newX = e.clientX - this.state.offsetX;
+                    const newY = e.clientY - this.state.offsetY;
+                    this._updatePanelPosition(newX, newY);
+                });
+            } else if (this.state.isResizing) {
+                const rect = this.panel.getBoundingClientRect();
+                let newWidth = e.clientX - rect.left;
+                let newHeight = e.clientY - rect.top;
+
+                // 최소 크기 제한
+                newWidth = Math.max(this.state.isCollapsed ? 60 : 240, newWidth);
+                newHeight = Math.max(this.state.isCollapsed ? 30 : 300, newHeight);
+
+                this.panel.style.width = `${newWidth}px`;
+                this.panel.style.height = `${newHeight}px`;
+            }
+        }
+
+        // 패널의 위치를 업데이트 (화면 경계 체크 포함)
+        _updatePanelPosition(x, y) {
+            const maxX = window.innerWidth - this.panel.offsetWidth;
+            const maxY = window.innerHeight - this.panel.offsetHeight;
+            x = Math.max(0, Math.min(x, maxX)); // X축 화면 경계 처리
+            y = Math.max(0, Math.min(y, maxY)); // Y축 화면 경계 처리
+            this.panel.style.left = `${x}px`;
+            this.panel.style.top = `${y}px`;
+        }
+
+        // 패널 드래그 또는 크기 조절 종료 처리
+        _endDragResize() {
+            if (this.state.isDragging || this.state.isResizing) {
+                this._savePanelState(); // 변경된 패널 상태 저장
+                if (this.state.isDragging) this.panel.style.transition = 'all 0.3s ease'; // 드래그 종료 후 transition 복원
+            }
+            this.state.isDragging = false;
+            this.state.isResizing = false;
+            if (this.state.animationFrameId) {
+                cancelAnimationFrame(this.state.animationFrameId);
+                this.state.animationFrameId = null;
+            }
+        }
+
+        // 패널 접기/펼치기 상태를 토글
+        togglePanel() {
+            this.state.isCollapsed = !this.state.isCollapsed;
+            this.state.isCollapsed ? this.collapse() : this.expand();
+            this._savePanelState(); // 상태 변경 후 저장
+        }
+
+        // 패널 스타일을 일괄적으로 업데이트하는 내부 헬퍼 메서드
+        _updatePanelStyle(styles) {
+            Object.entries(styles.panel || {}).forEach(([prop, val]) => this.panel.style[prop] = val);
+            Object.entries(styles.header || {}).forEach(([prop, val]) => this.header.style[prop] = val);
+            Object.entries(styles.contentContainer || {}).forEach(([prop, val]) => this.contentContainer.style[prop] = val);
+            Object.entries(styles.resizeHandle || {}).forEach(([prop, val]) => this.resizeHandle.style[prop] = val);
+            if (styles.toggleBtnText) this.toggleBtn.textContent = styles.toggleBtnText;
+        }
+
+        // 패널을 접힌 상태로 변경
+        collapse(save = true) {
+            this._updatePanelStyle({
+                panel: { width: '60px', height: '30px', padding: '3px 8px', minWidth: '60px', minHeight: '30px', borderRadius: '15px' },
+                header: { margin: '0', height: '24px', justifyContent: 'flex-end', alignItems: 'center' },
+                contentContainer: { display: 'none' }, // 내용 숨김
+                resizeHandle: { display: 'none' },   // 리사이즈 핸들 숨김
+                toggleBtnText: '+'                  // 토글 버튼 텍스트 변경
+            });
+            this.state.isCollapsed = true;
+            if (save) this._savePanelState(); // 상태 저장 (선택적)
+        }
+
+        // 패널을 펼쳐진 상태로 변경
+        expand(save = true) {
+            this._updatePanelStyle({
+                panel: {
+                    width: this.settings.get('width'), height: this.settings.get('height'), padding: '12px',
+                    minWidth: '240px', minHeight: '300px', borderRadius: '16px'
+                },
+                header: { marginBottom: '6px', justifyContent: 'flex-end', alignItems: 'flex-start' },
+                contentContainer: { display: 'flex' }, // 내용 표시
+                resizeHandle: { display: 'block' },  // 리사이즈 핸들 표시
+                toggleBtnText: '-'                 // 토글 버튼 텍스트 변경
+            });
+            this.state.isCollapsed = false;
+            if (save) this._savePanelState(); // 상태 저장 (선택적)
+        }
+
+        // 현재 패널의 위치, 크기, 접힘 상태를 로컬 스토리지에 저장
+        _savePanelState() {
+            this.settings.save({
+                top: this.panel.style.top,
+                left: this.panel.style.left,
+                width: this.panel.style.width,
+                height: this.state.isCollapsed ? this.settings.get('height') : this.panel.style.height, // 복구 시 원래 높이 사용
+                isCollapsed: this.state.isCollapsed
+            });
+        }
+
+        // 외부에서 패널의 contentContainer에 접근하기 위한 getter
+        get contentNode() {
+            return this.contentContainer;
+        }
+    }
+
+    // --- 댓글 분석기 클래스 --- //
+    // 웹페이지의 댓글 또는 특정 요소에서 정보를 추출
+    class CommentAnalyzer {
+        // 댓글 내용에서 지정된 패턴에 따라 숫자를 추출
+        static extractNumberFromComment() {
+            // INFO: 댓글 내용이 있는 셀의 CSS 선택자입니다. 필요시 수정하세요.
+            const commentCellSelector = 'tbody tr:first-child td:nth-child(2)';
+            const commentCell = document.querySelector(commentCellSelector);
+            if (!commentCell) return null; // 해당 요소가 없으면 null 반환
+
+            const commentText = commentCell.textContent.trim();
+            // INFO: 숫자 추출을 위한 정규식 패턴입니다. 필요시 수정하거나 추가하세요.
+            const patterns = [
+                /(?:물량|수량)\s*:?\s*(\d{1,3})(?:\s*(?:[eE][aA]|개|EA|ea|Ea|eA))?/i, // '물량 : 3 ea' 또는 '물량:3'
+                /\b(\d{1,3})\s*(?:[eE][aA]|개|EA|ea|Ea|eA)\b/i,                     // '3 ea'
+                /\b(\d{1,3})\b/                                                      // 첫 번째 숫자
+            ];
+
+            // 정의된 패턴 순서대로 매칭 시도
+            for (const pattern of patterns) {
+                const matches = commentText.match(pattern);
+                if (matches && matches[1]) return matches[1]; // 매칭되는 첫 번째 숫자 반환
+            }
+            return null; // 매칭되는 숫자가 없으면 null 반환
+        }
+
+        // 웹페이지의 특정 요소에서 테이블 정보(ipr 코드, 상품번호 등)를 추출
+        static extractTableInfo() {
+            // INFO: 테이블 정보 추출을 위한 CSS 선택자입니다. 필요시 수정하세요.
+            const iprSelector = '#ipr';       // ipr 코드 요소 선택자
+            const codeSelector = '#code';     // 상품번호/작성자 요소 선택자
+
+            // 지정된 선택자로 요소를 찾아 값(value 또는 textContent)을 반환하는 헬퍼 함수
+            const getElementValue = selector => document.querySelector(selector)?.value || document.querySelector(selector)?.textContent.trim() || '';
+            return {
+                code: getElementValue(iprSelector),
+                author: getElementValue(codeSelector)
+            };
+        }
+    }
+
+    // --- 버튼 액션 클래스 --- //
+    // 스크립트 내 버튼들의 공통적인 동작 및 상태 관리를 담당
+    class ButtonActions {
+        constructor(refreshCallback) {
+            this.refreshCallback = refreshCallback; // 데이터 새로고침 콜백 함수
+        }
+
+        // 클립보드 관련 작업을 처리하는 내부 헬퍼 메서드
+        async _clipboardOperation(button, operation, successMsg = "성공", errorMsg = "실패") {
+            try {
+                const text = await navigator.clipboard.readText(); // 클립보드 내용 읽기
+                if (!text || text.trim() === "") {
+                    this._setButtonState(button, 'error', "클립보드 비어있음");
+                    return;
+                }
+                this._setButtonState(button, 'process', "처리 중...");
+                setTimeout(() => { // 비동기처럼 처리하여 UI 반응성 유지
+                    const success = operation(text);
+                    this._setButtonState(button, success ? 'success' : 'error', success ? successMsg : errorMsg);
+                    setTimeout(() => this._setButtonState(button, 'normal'), 1000); // 일정 시간 후 버튼 상태 원래대로
+                }, 100);
+            } catch (err) {
+                console.error('클립보드 접근 오류:', err);
+                this._setButtonState(button, 'error', "클립보드 접근 실패");
+                setTimeout(() => this._setButtonState(button, 'normal'), 1000);
+            }
+        }
+
+        // 클립보드 내용을 현재 페이지에서 검색 (window.find 사용)
+        async searchClipboard(button) {
+            await this._clipboardOperation(button, (text) => window.find(text, false, false, true, false, true, false), "찾음", "못 찾음");
+        }
+
+        // 데이터 새로고침 동작 (주로 CommentHelperApp의 refreshData 호출)
+        refreshData(button) {
+            this._setButtonState(button, 'process', "새로고침 중...");
+            setTimeout(() => {
+                if (this.refreshCallback) this.refreshCallback();
+                this._setButtonState(button, 'success', "완료");
+                setTimeout(() => this._setButtonState(button, 'normal'), 1000);
+            }, 300);
+        }
+
+        // 페이지 스크롤 (상단 또는 하단)
+        scrollTo(position) {
+            window.scrollTo({ top: position === 'top' ? 0 : document.body.scrollHeight, behavior: 'smooth' });
+        }
+
+        // 지정된 텍스트를 댓글 입력 필드에 붙여넣기
+        pasteToComment(text) {
+            // INFO: 댓글 입력 필드의 CSS 선택자입니다. 필요시 수정하세요.
+            const commentInputSelector = '#poseinput';
+            const commentInput = document.querySelector(commentInputSelector);
+            if (commentInput) {
+                commentInput.value = text;
+                commentInput.focus();
+            } else {
+                console.warn(`${commentInputSelector} 요소를 찾을 수 없습니다.`);
+            }
+        }
+
+        // 댓글 저장 버튼 클릭 (저장 후 콜백 실행 가능)
+        saveComment(callback) {
+            // INFO: 댓글 저장 버튼의 CSS 선택자입니다. 필요시 수정하세요.
+            const saveButtonSelector = 'button[onclick="addComment()"]';
+            const saveButton = document.querySelector(saveButtonSelector);
+            if (saveButton) {
+                saveButton.click();
+                if (callback) setTimeout(callback, 500); // 저장 액션 후 약간의 딜레이를 두고 콜백 실행
+            } else {
+                console.warn(`${saveButtonSelector} 요소를 찾을 수 없습니다.`);
+            }
+        }
+
+        // 버튼의 상태(색상, 텍스트)를 변경하는 내부 메서드
+        _setButtonState(button, state, text = null) {
+            button.dataset.originalText = button.dataset.originalText || button.textContent; // 원래 텍스트 저장
+            button.textContent = text || button.dataset.originalText; // 새 텍스트 또는 원래 텍스트로 변경
+            const stateColors = {
+                normal: COLORS.neutral, process: COLORS.primary,
+                success: COLORS.success, error: COLORS.danger
+            };
+            button.style.backgroundColor = stateColors[state] || COLORS.neutral; // 상태에 맞는 배경색 적용
+        }
+
+        // 사용자 정의 기능 실행 (ID와 현재 버튼 텍스트를 기반으로 동작)
+        customFunction(id, text) {
+            console.log(`사용자 정의 기능 ${id} ("${text}") 실행`);
+            // INFO: 사용자 정의 기능 구현 부분입니다. 필요에 따라 수정하세요.
+            // 예: 특정 페이지로 이동, 특정 텍스트 복사 등
+            // if (id === 1) { navigator.clipboard.writeText('사용자 정의 텍스트 1'); }
+            // else if (id === 2) { window.open('https://www.example.com', '_blank'); }
+        }
+    }
+
+    // --- 메인 애플리케이션 클래스 --- //
+    // 스크립트의 전체적인 UI 구성, 이벤트 처리, 데이터 관리를 총괄
+    class CommentHelperApp {
+        constructor() {
+            this.settingsManager = new SettingsManager(STORAGE_KEY); // 설정 관리자 초기화
+            this.panel = new DraggablePanel(this.settingsManager);    // 드래그 패널 UI 초기화
+            this.actions = new ButtonActions(() => this.refreshData()); // 버튼 액션 관리자 초기화 (새로고침 콜백 전달)
+            this.extractedNumber = ""; // 추출된 숫자 저장 변수
+            this.uiElements = {};      // 생성된 주요 UI 요소들을 저장하는 객체
+
+            this._initUI();     // UI 요소들 생성 및 배치
+            this._initEvents();   // UI 요소들의 이벤트 리스너 설정
+            this.loadData();    // 초기 데이터 로드 (숫자 추출, 테이블 정보 로드)
+        }
+
+        // 편집 가능한 라벨 UI 요소를 생성하고 반환
+        _createEditableLabel() {
+            this.uiElements.labelText = DOMHelper.createElement('div', {
+                attributes: { contentEditable: true }, // 내용 편집 가능하게 설정
+                style: {
+                    width: '100%', fontSize: '14px', outline: 'none', lineHeight: '1.4',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' // 한 줄로 표시, 넘치면 ...
+                }
+            });
+            this.uiElements.labelContainer = DOMHelper.createElement('div', {
+                style: {
+                    margin: '0', padding: '8px', borderRadius: '10px', border: `1px solid ${COLORS.border}`,
+                    minHeight: '24px', height: 'auto', background: COLORS.white, cursor: 'text',
+                    display: 'flex', alignItems: 'center', overflow: 'hidden'
+                },
+                children: [this.uiElements.labelText]
+            });
+            return this.uiElements.labelContainer;
+        }
+
+        // 정보 표시용 테이블 UI 요소를 생성하고 반환
+        _createTable() {
+            const createCell = (text, style = {}) => DOMHelper.createElement('td', { text, style });
+            const commonCellStyle = { padding: '6px', textAlign: 'left' };
+            const headerCellStyle = { ...commonCellStyle, fontWeight: 'bold', width: '40%', borderRight: `1px solid ${COLORS.border}` };
+            const borderedCellStyle = { ...commonCellStyle, borderTop: `1px solid ${COLORS.border}` };
+            const borderedHeaderCellStyle = { ...headerCellStyle, ...borderedCellStyle };
+
+            this.uiElements.codeValueCell = createCell('', commonCellStyle);   // 코드 값 표시 셀
+            this.uiElements.authorValueCell = createCell('', borderedCellStyle); // 작성자 값 표시 셀
+
+            // INFO: 테이블에 표시될 라벨입니다. 필요시 수정하세요.
+            const codeLabelText = "ipr 코드";
+            const authorLabelText = "상품번호";
+
+            const codeRow = DOMHelper.createElement('tr', { children: [createCell(codeLabelText, headerCellStyle), this.uiElements.codeValueCell] });
+            const authorRow = DOMHelper.createElement('tr', { children: [createCell(authorLabelText, borderedHeaderCellStyle), this.uiElements.authorValueCell] });
+
+            this.uiElements.infoTable = DOMHelper.createElement('table', {
+                style: {
+                    width: '100%', borderCollapse: 'collapse', margin: '0', border: `1px solid ${COLORS.border}`,
+                    borderRadius: '10px', overflow: 'hidden', fontSize: '13px', backgroundColor: COLORS.tableBg
+                },
+                children: [codeRow, authorRow]
+            });
+            return this.uiElements.infoTable;
+        }
+
+        // 기능 버튼 그룹들을 생성하고 배열로 반환
+        _createButtonGroups() {
+            // INFO: 버튼에 표시될 텍스트입니다. 필요시 수정하세요.
+            const btnConfigs = [
+                { name: 'pasteBtn', text: '붙여넣기', style: { marginRight: '4px', backgroundColor: COLORS.success } },
+                { name: 'saveBtn', text: '저장', style: { marginLeft: '4px', backgroundColor: COLORS.primary } },
+                { name: 'clipboardBtn', text: '클립보드 찾기' },
+                { name: 'refreshBtn', text: '새로고침' },
+                { name: 'topBtn', text: '상단으로' },
+                { name: 'bottomBtn', text: '하단으로' },
+                // 사용자 정의 버튼의 텍스트는 설정에서 가져옵니다.
+                { name: 'customBtn1', text: this.settingsManager.get('customBtn1Text') },
+                { name: 'customBtn2', text: this.settingsManager.get('customBtn2Text') }
+            ];
+
+            // 설정에 따라 버튼 객체 생성 및 uiElements에 저장
+            btnConfigs.forEach(cfg => {
+                this.uiElements[cfg.name] = DOMHelper.createButton(cfg.text, {}, cfg.style || {});
+            });
+
+            // 버튼들을 그룹으로 묶는 컨테이너 생성 함수
+            const createButtonGroup = (buttons) => DOMHelper.createElement('div', {
+                style: { display: 'flex', justifyContent: 'space-between', gap: '4px' },
+                children: buttons
+            });
+
+            // 최종 버튼 그룹 배열 반환
+            return [
+                createButtonGroup([this.uiElements.pasteBtn, this.uiElements.saveBtn]),
+                createButtonGroup([this.uiElements.clipboardBtn, this.uiElements.refreshBtn]),
+                createButtonGroup([this.uiElements.topBtn, this.uiElements.bottomBtn]),
+                createButtonGroup([this.uiElements.customBtn1, this.uiElements.customBtn2]),
+            ];
+        }
+
+        // 패널 내부에 들어갈 전체 UI 요소들을 초기화하고 배치
+        _initUI() {
+            // 드롭다운 선택 UI 생성
+            this.uiElements.select = DOMHelper.createElement('select', {
+                style: { margin: '0', padding: '8px', borderRadius: '10px', border: `1px solid ${COLORS.border}`, fontSize: '14px' }
+            });
+            // INFO: 드롭다운 선택지에 표시될 항목들입니다. 필요시 수정하세요.
+            const selectOptions = ["인계수량", "AGV수량", "불량수량", "검사수량"];
+            selectOptions.forEach(text => {
+                this.uiElements.select.appendChild(DOMHelper.createElement('option', { value: text, text }));
+            });
+
+            // 버튼 그룹들 생성
+            const buttonGroups = this._createButtonGroups();
+
+            // 패널에 추가할 UI 요소들 배열 순서 조정
+            const elementsToAppend = [
+                this.uiElements.select,    // 드롭다운
+                this._createEditableLabel(), // 편집 가능한 라벨
+                buttonGroups[0],           // 첫 번째 버튼 그룹 (붙여넣기, 저장)
+                this._createTable(),       // 정보 테이블 (ipr 코드, 상품번호 등)
+                ...buttonGroups.slice(1)   // 나머지 버튼 그룹들
+            ];
+            // 각 요소를 패널의 contentContainer에 추가
+            elementsToAppend.forEach(el => this.panel.contentNode.appendChild(el));
+        }
+
+        // UI 요소들에 대한 이벤트 리스너들을 설정
+        _initEvents() {
+            const { select, labelContainer, labelText, pasteBtn, saveBtn, clipboardBtn, refreshBtn, topBtn, bottomBtn, customBtn1, customBtn2 } = this.uiElements;
+
+            // 드롭다운 변경 시 라벨 업데이트
+            select.addEventListener('change', () => this.updateLabel());
+
+            // 버튼 클릭 이벤트 연결
+            pasteBtn.addEventListener('click', () => this.actions.pasteToComment(labelText.textContent));
+            saveBtn.addEventListener('click', () => this.actions.saveComment(() => this.refreshData()));
+            clipboardBtn.addEventListener('click', () => this.actions.searchClipboard(clipboardBtn));
+            refreshBtn.addEventListener('click', () => this.actions.refreshData(refreshBtn));
+            topBtn.addEventListener('click', () => this.actions.scrollTo('top'));
+            bottomBtn.addEventListener('click', () => this.actions.scrollTo('bottom'));
+            customBtn1.addEventListener('click', () => this.actions.customFunction(1, customBtn1.textContent));
+            customBtn2.addEventListener('click', () => this.actions.customFunction(2, customBtn2.textContent));
+
+            // 편집 가능한 라벨 클릭 시 포커스 및 스타일 변경
+            labelContainer.addEventListener('click', () => {
+                labelText.focus();
+                Object.assign(labelText.style, { whiteSpace: "normal", overflow: "visible", textOverflow: "clip" });
+            });
+            // 라벨 포커스 아웃 시 원래 스타일로 복원 (한 줄 표시, ... 처리)
+            labelText.addEventListener('blur', () => {
+                Object.assign(labelText.style, { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
+            });
+        }
+
+        // 스크립트 동작에 필요한 초기 데이터를 로드
+        loadData() {
+            this.extractNumber();  // 댓글에서 숫자 추출
+            this.loadTableInfo(); // 테이블 정보 로드
+        }
+
+        // 데이터를 새로고침 (숫자 재추출, 테이블 정보 재로드)
+        refreshData() {
+            this.extractNumber();
+            this.loadTableInfo();
+            console.log("데이터 새로고침 완료");
+        }
+
+        // 댓글에서 숫자를 추출하여 `extractedNumber`에 저장하고 라벨을 업데이트
+        extractNumber() {
+            const number = CommentAnalyzer.extractNumberFromComment();
+            if (number) {
+                this.extractedNumber = number;
+                this.updateLabel();
+            } else {
+                // console.log("댓글에서 숫자를 추출하지 못했습니다.");
+            }
+        }
+
+        // 테이블 정보를 로드하여 UI에 표시
+        loadTableInfo() {
+            const info = CommentAnalyzer.extractTableInfo();
+            this.uiElements.codeValueCell.textContent = info.code;
+            this.uiElements.authorValueCell.textContent = info.author;
+        }
+
+        // 드롭다운 선택 값과 추출된 숫자를 조합하여 라벨 텍스트를 업데이트
+        updateLabel() {
+            const prefix = this.uiElements.select.value;
+            // INFO: 라벨에 표시될 텍스트 형식입니다. 필요시 수정하세요. (예: `${prefix} - ${this.extractedNumber}개`)
+            this.uiElements.labelText.textContent = `${prefix} : ${this.extractedNumber} ea`;
+        }
+    }
+
+    // --- 스크립트 시작점 --- //
+    // CommentHelperApp 인스턴스를 생성하여 스크립트 실행
+    new CommentHelperApp();
+})();

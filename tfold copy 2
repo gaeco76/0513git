@@ -1,0 +1,762 @@
+// ==UserScript==
+// @name         utility
+// @namespace    http://tampermonkey.net/
+// @version      0.2
+// @description  댓글에서 숫자를 추출하고 편집 도구를 제공합니다
+// @match        *://*/*
+// @grant        none
+// @author       댓글도우미
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // 스타일 상수 정의
+    const COLORS = {
+        primary: '#2196F3',
+        success: '#4CAF50',
+        danger: '#f44336',
+        neutral: '#607D8B',
+        panelBg: '#f9f9f9',
+        tableBg: '#f0f0f0',
+        border: '#ccc'
+    };
+
+    // 기본 설정 값
+    const DEFAULT_SETTINGS = {
+        top: '20%',
+        left: '20%',
+        width: '200px',
+        height: 'auto',
+        isCollapsed: false,
+        customBtn1Text: '사용자 정의 1',
+        customBtn2Text: '사용자 정의 2'
+    };
+
+    // 설정 관리
+    class SettingsManager {
+        constructor(storageKey) {
+            this.storageKey = storageKey;
+            this.settings = this.load();
+        }
+
+        load() {
+            try {
+                return {...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(this.storageKey) || '{}')};
+            } catch (e) {
+                console.error('설정 로드 오류:', e);
+                return {...DEFAULT_SETTINGS};
+            }
+        }
+
+        save(newSettings) {
+            this.settings = {...this.settings, ...newSettings};
+            localStorage.setItem(this.storageKey, JSON.stringify(this.settings));
+        }
+
+        get(key) {
+            return this.settings[key];
+        }
+    }
+
+    // UI 요소 생성 헬퍼
+    class UIFactory {
+        static createElement(tag, styles, attributes = {}) {
+            const element = document.createElement(tag);
+
+            // 스타일 적용
+            Object.entries(styles).forEach(([prop, value]) => {
+                element.style[prop] = value;
+            });
+
+            // 속성 적용
+            Object.entries(attributes).forEach(([prop, value]) => {
+                if (prop === 'text') {
+                    element.textContent = value;
+                } else if (prop === 'html') {
+                    element.innerHTML = value;
+                } else {
+                    element[prop] = value;
+                }
+            });
+
+            return element;
+        }
+
+        static createButton(text, styles = {}) {
+            return this.createElement('button', {
+                flex: '1',
+                padding: '8px 4px',
+                borderRadius: '8px',
+                border: 'none',
+                backgroundColor: COLORS.neutral,
+                color: 'white',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 'bold',
+                transition: 'background-color 0.2s',
+                ...styles
+            }, { text });
+        }
+    }
+
+    // 패널 관리 클래스
+    class DraggablePanel {
+        constructor(settingsManager) {
+            this.settings = settingsManager;
+            this.isPanelCollapsed = this.settings.get('isCollapsed');
+            this.isDragging = false;
+            this.isResizing = false;
+            this.offsetX = 0;
+            this.offsetY = 0;
+            this.lastX = 0;
+            this.lastY = 0;
+            this.animationFrameId = null;
+
+            this.createPanelElements();
+            this.initEventListeners();
+
+            // 초기 상태 설정
+            if (this.isPanelCollapsed) {
+                this.collapsePanel();
+            }
+        }
+
+        createPanelElements() {
+            // 메인 패널
+            this.panel = UIFactory.createElement('div', {
+                position: 'fixed',
+                top: this.settings.get('top'),
+                left: this.settings.get('left'),
+                width: this.settings.get('width'),
+                height: this.settings.get('height'),
+                padding: '12px',
+                background: COLORS.panelBg,
+                borderRadius: '16px',
+                boxShadow: '0 0 10px rgba(0,0,0,0.2)',
+                display: 'flex',
+                flexDirection: 'column',
+                zIndex: '9999',
+                overflow: 'auto',
+                minWidth: '240px',
+                minHeight: '300px',
+                transition: 'all 0.3s ease'
+            }, { id: 'draggablePanel' });
+
+            // 헤더 영역
+            this.header = UIFactory.createElement('div', {
+                cursor: 'move',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                marginBottom: '6px',
+                height: '24px'
+            });
+
+            // 토글 버튼
+            this.toggleBtn = UIFactory.createElement('button', {
+                width: '24px',
+                height: '24px',
+                borderRadius: '50%',
+                border: 'none',
+                background: '#ddd',
+                cursor: 'pointer',
+                textAlign: 'center',
+                lineHeight: '22px',
+                fontSize: '16px',
+                padding: '0',
+                transition: 'all 0.3s ease'
+            }, { text: '-', title: '접기/펼치기' });
+
+            // 콘텐츠 컨테이너
+            this.contentContainer = UIFactory.createElement('div', {
+                display: 'flex',
+                flexDirection: 'column',
+                width: '100%',
+                gap: '6px'
+            });
+
+            // 리사이즈 핸들
+            this.resizeHandle = UIFactory.createElement('div', {
+                position: 'absolute',
+                width: '16px',
+                height: '16px',
+                bottom: '3px',
+                right: '3px',
+                cursor: 'nwse-resize',
+                zIndex: '10000',
+                display: this.isPanelCollapsed ? 'none' : 'block',
+                backgroundColor: 'transparent'
+            });
+
+            // 요소 조립
+            this.header.appendChild(this.toggleBtn);
+            this.panel.appendChild(this.header);
+            this.panel.appendChild(this.contentContainer);
+            this.panel.appendChild(this.resizeHandle);
+            document.body.appendChild(this.panel);
+        }
+
+        initEventListeners() {
+            // 토글 버튼
+            this.toggleBtn.addEventListener('click', () => this.togglePanel());
+
+            // 드래그 이벤트
+            this.header.addEventListener('mousedown', (e) => this.startDragging(e));
+
+            // 리사이징 이벤트
+            this.resizeHandle.addEventListener('mousedown', (e) => this.startResizing(e));
+
+            // 문서 레벨 이벤트
+            document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+            document.addEventListener('mouseup', () => this.endDragResize());
+        }
+
+        startDragging(e) {
+            this.isDragging = true;
+            this.offsetX = e.clientX - this.panel.getBoundingClientRect().left;
+            this.offsetY = e.clientY - this.panel.getBoundingClientRect().top;
+            this.panel.style.transition = 'none';
+            e.preventDefault();
+        }
+
+        startResizing(e) {
+            this.isResizing = true;
+            this.panel.style.transition = 'none';
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        handleMouseMove(e) {
+            if (this.isDragging) {
+                if (this.animationFrameId) {
+                    cancelAnimationFrame(this.animationFrameId);
+                }
+
+                this.animationFrameId = requestAnimationFrame(() => {
+                    const newX = e.clientX - this.offsetX;
+                    const newY = e.clientY - this.offsetY;
+                    this.updatePanelPosition(newX, newY);
+                });
+            } else if (this.isResizing) {
+                const rect = this.panel.getBoundingClientRect();
+                const newWidth = e.clientX - rect.left;
+                const newHeight = e.clientY - rect.top;
+
+                const minWidth = this.isPanelCollapsed ? 60 : 240;
+                if (newWidth >= minWidth) {
+                    this.panel.style.width = newWidth + 'px';
+                }
+
+                const minHeight = this.isPanelCollapsed ? 30 : 300;
+                if (newHeight >= minHeight) {
+                    this.panel.style.height = newHeight + 'px';
+                }
+            }
+        }
+
+        updatePanelPosition(x, y) {
+            // 화면 경계 체크
+            const maxX = window.innerWidth - this.panel.offsetWidth;
+            const maxY = window.innerHeight - this.panel.offsetHeight;
+
+            x = Math.max(0, Math.min(x, maxX));
+            y = Math.max(0, Math.min(y, maxY));
+
+            this.panel.style.left = x + 'px';
+            this.panel.style.top = y + 'px';
+
+            this.lastX = x;
+            this.lastY = y;
+        }
+
+        endDragResize() {
+            if (this.isDragging || this.isResizing) {
+                this.savePosition();
+
+                if (this.isDragging) {
+                    this.panel.style.transition = 'all 0.3s ease';
+                }
+            }
+            this.isDragging = false;
+            this.isResizing = false;
+
+            if (this.animationFrameId) {
+                cancelAnimationFrame(this.animationFrameId);
+                this.animationFrameId = null;
+            }
+        }
+
+        togglePanel() {
+            this.isPanelCollapsed = !this.isPanelCollapsed;
+
+            if (this.isPanelCollapsed) {
+                this.collapsePanel();
+            } else {
+                this.expandPanel();
+            }
+
+            this.savePosition();
+        }
+
+        collapsePanel() {
+            this.contentContainer.style.display = 'none';
+            this.toggleBtn.textContent = '+';
+
+            this.panel.style.width = '60px';
+            this.panel.style.height = '30px';
+            this.panel.style.padding = '3px 8px';
+            this.panel.style.minWidth = '60px';
+            this.panel.style.minHeight = '30px';
+            this.panel.style.borderRadius = '15px';
+            this.header.style.margin = '0';
+            this.header.style.height = '24px';
+            this.header.style.justifyContent = 'flex-end';
+            this.header.style.alignItems = 'center';
+            this.resizeHandle.style.display = 'none';
+        }
+
+        expandPanel() {
+            this.contentContainer.style.display = 'flex';
+            this.toggleBtn.textContent = '-';
+
+            this.panel.style.width = this.settings.get('width');
+            this.panel.style.height = this.settings.get('height');
+            this.panel.style.padding = '12px';
+            this.panel.style.minWidth = '240px';
+            this.panel.style.minHeight = '300px';
+            this.panel.style.borderRadius = '16px';
+            this.header.style.marginBottom = '6px';
+            this.header.style.justifyContent = 'flex-end';
+            this.header.style.alignItems = 'flex-start';
+            this.resizeHandle.style.display = 'block';
+        }
+
+        savePosition() {
+            this.settings.save({
+                top: this.panel.style.top,
+                left: this.panel.style.left,
+                width: this.panel.style.width,
+                height: this.isPanelCollapsed ? this.settings.get('height') : this.panel.style.height,
+                isCollapsed: this.isPanelCollapsed
+            });
+        }
+    }
+
+    // 댓글 분석기 클래스
+    class CommentAnalyzer {
+        static extractNumberFromComment() {
+            const tbody = document.querySelector('tbody');
+            if (!tbody) return null;
+
+            const firstRow = tbody.querySelector('tr');
+            if (!firstRow) return null;
+
+            const commentCell = firstRow.cells[1];
+            if (!commentCell) return null;
+
+            const commentText = commentCell.textContent.trim();
+
+            // 패턴 1: '물량 : 3 ea' 또는 '물량:3' 패턴
+            let matches = commentText.match(/(?:물량|수량)\s*:?\s*(\d{1,3})(?:\s*(?:[eE][aA]|개|EA|ea|Ea|eA))?/i);
+            if (matches && matches[1]) {
+                return matches[1];
+            }
+
+            // 패턴 2: '3 ea' 패턴
+            matches = commentText.match(/\b(\d{1,3})\s*(?:[eE][aA]|개|EA|ea|Ea|eA)\b/i);
+            if (matches && matches[1]) {
+                return matches[1];
+            }
+
+            // 패턴 3: 첫 번째 숫자
+            matches = commentText.match(/\b(\d{1,3})\b/);
+            if (matches && matches[1]) {
+                return matches[1];
+            }
+
+            return null;
+        }
+
+        static extractTableInfo() {
+            const result = { code: '', author: '' };
+
+            // ipr 코드 추출
+            const iprElement = document.querySelector('#ipr');
+            if (iprElement) {
+                result.code = iprElement.value || iprElement.textContent.trim();
+            }
+
+            // 상품번호 추출
+            const codeElement = document.querySelector('#code');
+            if (codeElement) {
+                result.author = codeElement.value || codeElement.textContent.trim();
+            }
+
+            return result;
+        }
+    }
+
+    // 버튼 액션 관리 클래스
+    class ButtonActions {
+        constructor(refreshCallback) {
+            this.refreshCallback = refreshCallback;
+        }
+
+        async searchClipboard(button) {
+            try {
+                const text = await navigator.clipboard.readText();
+                if (text && text.trim() !== "") {
+                    this.setButtonState(button, 'process', "검색 중...");
+
+                    setTimeout(() => {
+                        const found = window.find(text, false, false, true, false, true, false);
+
+                        this.setButtonState(button, found ? 'success' : 'error');
+                        setTimeout(() => this.setButtonState(button, 'normal'), 1000);
+                    }, 100);
+                }
+            } catch (err) {
+                console.error('클립보드 접근 오류:', err);
+                this.setButtonState(button, 'error');
+                setTimeout(() => this.setButtonState(button, 'normal'), 1000);
+            }
+        }
+
+        refreshData(button) {
+            this.setButtonState(button, 'process', "새로고침 중...");
+
+            setTimeout(() => {
+                if (this.refreshCallback) this.refreshCallback();
+
+                this.setButtonState(button, 'success');
+                setTimeout(() => this.setButtonState(button, 'normal'), 1000);
+            }, 300);
+        }
+
+        scrollToTop() {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        scrollToBottom() {
+            window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        }
+
+        pasteToComment(text) {
+            const commentInput = document.querySelector('#poseinput');//붙여넣기 
+            if (commentInput) {
+                commentInput.value = text;
+                commentInput.focus();
+            }
+        }
+
+        saveComment(callback) {
+            const saveButton = document.querySelector('button[onclick="addComment()"]');
+            if (saveButton) {
+                saveButton.click();
+                if (callback) setTimeout(callback, 500);
+            }
+        }
+
+        setButtonState(button, state, text = null) {
+            const originalText = button.dataset.originalText || button.textContent;
+
+            if (!button.dataset.originalText) {
+                button.dataset.originalText = originalText;
+            }
+
+            if (text) {
+                button.textContent = text;
+            } else {
+                button.textContent = button.dataset.originalText;
+            }
+
+            switch (state) {
+                case 'normal':
+                    button.style.backgroundColor = COLORS.neutral;
+                    break;
+                case 'process':
+                    button.style.backgroundColor = COLORS.primary;
+                    break;
+                case 'success':
+                    button.style.backgroundColor = COLORS.success;
+                    break;
+                case 'error':
+                    button.style.backgroundColor = COLORS.danger;
+                    break;
+            }
+        }
+
+        // 사용자 정의 기능 1
+        customFunction1() {
+            console.log("사용자 정의 기능 1 실행");
+            // 여기에 원하는 기능 구현
+        }
+
+        // 사용자 정의 기능 2
+        customFunction2() {
+            console.log("사용자 정의 기능 2 실행");
+            // 여기에 원하는 기능 구현
+        }
+    }
+
+    // 메인 앱 클래스
+    class CommentHelperApp {
+        constructor() {
+            this.settingsManager = new SettingsManager('commentHelperSettings');
+            this.panel = new DraggablePanel(this.settingsManager);
+            this.actions = new ButtonActions(() => this.refreshData());
+
+            this.extractedNumber = "";
+
+            this.initUI();
+            this.initEvents();
+            this.loadData();
+        }
+
+        initUI() {
+            // 드롭다운 선택창
+            this.select = UIFactory.createElement('select', {
+                margin: '0',
+                padding: '8px',
+                borderRadius: '10px',
+                border: `1px solid ${COLORS.border}`,
+                fontSize: '14px'
+            });
+
+            ["인계수량", "AGV수량", "불량수량", "검사수량"].forEach(text => {
+                const opt = document.createElement("option");
+                opt.value = text;
+                opt.textContent = text;
+                this.select.appendChild(opt);
+            });
+
+            // 편집 가능한 라벨 컨테이너
+            this.labelContainer = UIFactory.createElement('div', {
+                margin: '0',
+                padding: '8px',
+                borderRadius: '10px',
+                border: `1px solid ${COLORS.border}`,
+                minHeight: '24px',
+                height: 'auto',
+                background: '#fff',
+                cursor: 'text',
+                display: 'flex',
+                alignItems: 'center',
+                overflow: 'hidden'
+            });
+
+            // 편집 가능한 라벨 텍스트
+            this.labelText = UIFactory.createElement('div', {
+                width: '100%',
+                fontSize: '14px',
+                outline: 'none',
+                lineHeight: '1.4',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis'
+            }, { contentEditable: true });
+
+            this.labelContainer.appendChild(this.labelText);
+
+            // 버튼 컨테이너
+            this.buttonContainer = UIFactory.createElement('div', {
+                display: 'flex',
+                justifyContent: 'space-between',
+                marginTop: '0'
+            });
+
+            // 붙여넣기 버튼
+            this.pasteBtn = UIFactory.createButton("붙여넣기", {
+                marginRight: '4px',
+                backgroundColor: COLORS.success
+            });
+
+            // 저장 버튼
+            this.saveBtn = UIFactory.createButton("저장", {
+                marginLeft: '4px',
+                backgroundColor: COLORS.primary
+            });
+
+            this.buttonContainer.appendChild(this.pasteBtn);
+            this.buttonContainer.appendChild(this.saveBtn);
+
+            // 테이블 생성
+            this.infoTable = UIFactory.createElement('table', {
+                width: '100%',
+                borderCollapse: 'collapse',
+                margin: '0',
+                border: `1px solid ${COLORS.border}`,
+                borderRadius: '10px',
+                overflow: 'hidden',
+                fontSize: '13px',
+                backgroundColor: COLORS.tableBg
+            });
+
+            // 코드번호 행
+            const codeRow = this.infoTable.insertRow();
+            this.codeLabelCell = codeRow.insertCell();
+            this.codeLabelCell.textContent = "ipr 코드";
+            Object.assign(this.codeLabelCell.style, {
+                padding: '6px',
+                fontWeight: 'bold',
+                textAlign: 'left',
+                width: '40%',
+                borderRight: `1px solid ${COLORS.border}`
+            });
+
+            this.codeValueCell = codeRow.insertCell();
+            Object.assign(this.codeValueCell.style, {
+                padding: '6px',
+                textAlign: 'left'
+            });
+
+            // 작성자 행
+            const authorRow = this.infoTable.insertRow();
+            this.authorLabelCell = authorRow.insertCell();
+            this.authorLabelCell.textContent = "상품번호";
+            Object.assign(this.authorLabelCell.style, {
+                padding: '6px',
+                fontWeight: 'bold',
+                textAlign: 'left',
+                width: '40%',
+                borderRight: `1px solid ${COLORS.border}`,
+                borderTop: `1px solid ${COLORS.border}`
+            });
+
+            this.authorValueCell = authorRow.insertCell();
+            Object.assign(this.authorValueCell.style, {
+                padding: '6px',
+                textAlign: 'left',
+                borderTop: `1px solid ${COLORS.border}`
+            });
+
+            // 기능 버튼 컨테이너 생성
+            this.extraButtonContainer1 = UIFactory.createElement('div', {
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: '4px'
+            });
+
+            this.extraButtonContainer2 = UIFactory.createElement('div', {
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: '4px'
+            });
+
+            this.extraButtonContainer3 = UIFactory.createElement('div', {
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: '4px'
+            });
+
+            // 기능 버튼 생성
+            this.clipboardBtn = UIFactory.createButton("클립보드 찾기");
+            this.refreshBtn = UIFactory.createButton("새로고침");
+            this.topBtn = UIFactory.createButton("상단으로");
+            this.bottomBtn = UIFactory.createButton("하단으로");
+            this.customBtn1 = UIFactory.createButton(this.settingsManager.get('customBtn1Text'));
+            this.customBtn2 = UIFactory.createButton(this.settingsManager.get('customBtn2Text'));
+
+            this.extraButtonContainer1.appendChild(this.clipboardBtn);
+            this.extraButtonContainer1.appendChild(this.refreshBtn);
+            this.extraButtonContainer2.appendChild(this.topBtn);
+            this.extraButtonContainer2.appendChild(this.bottomBtn);
+            this.extraButtonContainer3.appendChild(this.customBtn1);
+            this.extraButtonContainer3.appendChild(this.customBtn2);
+
+            // 요소들을 패널에 추가
+            this.panel.contentContainer.appendChild(this.select);
+            this.panel.contentContainer.appendChild(this.labelContainer);
+            this.panel.contentContainer.appendChild(this.buttonContainer);
+            this.panel.contentContainer.appendChild(this.infoTable);
+            this.panel.contentContainer.appendChild(this.extraButtonContainer1);
+            this.panel.contentContainer.appendChild(this.extraButtonContainer2);
+            this.panel.contentContainer.appendChild(this.extraButtonContainer3);
+        }
+
+        initEvents() {
+            // 드롭다운 변경 이벤트
+            this.select.addEventListener('change', () => this.updateLabel());
+
+            // 버튼 이벤트
+            this.pasteBtn.addEventListener('click', () => {
+                this.actions.pasteToComment(this.labelText.textContent);
+            });
+
+            this.saveBtn.addEventListener('click', () => {
+                this.actions.saveComment(() => this.refreshData());
+            });
+
+            this.clipboardBtn.addEventListener('click', () => {
+                this.actions.searchClipboard(this.clipboardBtn);
+            });
+
+            this.refreshBtn.addEventListener('click', () => {
+                this.actions.refreshData(this.refreshBtn);
+            });
+
+            this.topBtn.addEventListener('click', () => {
+                this.actions.scrollToTop();
+            });
+
+            this.bottomBtn.addEventListener('click', () => {
+                this.actions.scrollToBottom();
+            });
+
+            this.customBtn1.addEventListener('click', () => {
+                this.actions.customFunction1();
+            });
+
+            this.customBtn2.addEventListener('click', () => {
+                this.actions.customFunction2();
+            });
+
+            // 라벨 클릭 이벤트
+            this.labelContainer.addEventListener('click', () => {
+                this.labelText.focus();
+                this.labelText.style.whiteSpace = "normal";
+                this.labelText.style.overflow = "visible";
+                this.labelText.style.textOverflow = "clip";
+            });
+
+            // 라벨 포커스 아웃 이벤트
+            this.labelText.addEventListener('blur', () => {
+                this.labelText.style.whiteSpace = "nowrap";
+                this.labelText.style.overflow = "hidden";
+                this.labelText.style.textOverflow = "ellipsis";
+            });
+        }
+
+        loadData() {
+            this.extractNumber();
+            this.loadTableInfo();
+        }
+
+        refreshData() {
+            this.extractNumber();
+            this.loadTableInfo();
+        }
+
+        extractNumber() {
+            const number = CommentAnalyzer.extractNumberFromComment();
+            if (number) {
+                this.extractedNumber = number;
+                this.updateLabel();
+            }
+        }
+
+        loadTableInfo() {
+            const info = CommentAnalyzer.extractTableInfo();
+            this.codeValueCell.textContent = info.code;
+            this.authorValueCell.textContent = info.author;
+        }
+
+        updateLabel() {
+            const prefix = this.select.value;
+            this.labelText.textContent = `${prefix} : ${this.extractedNumber} ea`;
+        }
+    }
+
+    // 앱 초기화
+    new CommentHelperApp();
+})();

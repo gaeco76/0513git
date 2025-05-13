@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>코드 테이블</title>
+    <style>
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            max-width: 800px;
+            margin: 20px auto;
+        }
+
+        th,
+        td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        .delete-btn {
+            background-color: #f44336;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .delete-btn:hover {
+            background-color: #d32f2f;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            margin: 20px auto;
+            max-width: 800px;
+            gap: 5px;
+        }
+
+        .pagination button {
+            padding: 8px 12px;
+            background-color: #f5f5f5;
+            color: #333;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .pagination button:hover {
+            background-color: #e0e0e0;
+        }
+
+        .pagination button.active {
+            background-color: #4CAF50;
+            color: white;
+            border-color: #4CAF50;
+        }
+
+        .pagination button:disabled {
+            background-color: #f5f5f5;
+            color: #aaa;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<style>
+    .input-container {
+        max-width: 800px;
+        margin: 20px auto;
+        display: flex;
+        gap: 10px;
+    }
+
+    input[type="text"] {
+        flex: 1;
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+
+    button {
+        padding: 8px 16px;
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+
+    button:hover {
+        background-color: #45a049;
+    }
+
+    .info-text {
+        max-width: 800px;
+        margin: 10px auto;
+        color: #666;
+        font-size: 14px;
+    }
+</style>
+
+<script>
+    // 페이지 관련 전역 변수
+    let currentPage = 1;
+    const rowsPerPage = 20;
+
+    // 페이지 로드 시 localStorage에서 데이터 불러오기
+    document.addEventListener('DOMContentLoaded', function () {
+        // 페이지 로드 시 무조건 새로운 데이터 45개 생성
+        resetData(false);
+    });
+
+    // 샘플 데이터 생성
+    function generateSampleData(count) {
+        const commentTemplates = [
+            '%d층 - 물량: %d ea',
+            '입고 물량: %d ea',
+            '물량: %d ea 확인 완료',
+            '출고 물량: %d ea',
+            '물량 %d ea - 불량품',
+            '%d호 물량: %d ea',
+            '물량 검수: %d ea',
+            '물량 %d ea - 재고 확인',
+            '%d구역 물량: %d ea',
+            '반품 물량: %d ea'
+        ];
+
+        const data = [];
+        let code = 3500;
+
+        for (let i = 0; i < count; i++) {
+            const randomQuantity = Math.floor(Math.random() * 10) + 1;
+            const commentTemplate = commentTemplates[Math.floor(Math.random() * commentTemplates.length)];
+
+            // 템플릿에 따라 랜덤 값 처리
+            let comment;
+            if (commentTemplate.indexOf('%d층') !== -1 || commentTemplate.indexOf('%d호') !== -1 || commentTemplate.indexOf('%d구역') !== -1) {
+                // 층수나 호수, 구역이 필요한 경우
+                const randomFloor = Math.floor(Math.random() * 20) + 1;
+                comment = commentTemplate.replace('%d', randomFloor).replace('%d', randomQuantity);
+            } else {
+                // 일반 템플릿
+                comment = commentTemplate.replace('%d', randomQuantity);
+            }
+
+            data.push({
+                code: code--,
+                comment: comment,
+                writer: Math.floor(63549800 + Math.random() * 200)
+            });
+        }
+
+        return data;
+    }
+
+    // 테이블 렌더링 함수 (페이지네이션 적용)
+    function renderTableWithPagination(data, page) {
+        const tbody = document.querySelector('tbody');
+        tbody.innerHTML = '';
+
+        // 페이지네이션 계산
+        const startIndex = (page - 1) * rowsPerPage;
+        const endIndex = Math.min(startIndex + rowsPerPage, data.length);
+        const paginatedData = data.slice(startIndex, endIndex);
+
+        // 테이블 데이터 렌더링
+        paginatedData.forEach(item => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${item.code}</td>
+                <td>${item.comment}</td>
+                <td>${item.writer}</td>
+                <td><button class="delete-btn" onclick="deleteRow(${item.code})">삭제</button></td>
+            `;
+            tbody.appendChild(row);
+        });
+
+        // 페이지네이션 UI 업데이트
+        updatePagination(data.length, page);
+
+        // 데이터 정보 표시
+        updateDataInfo(data.length, startIndex, endIndex);
+    }
+
+    // 페이지네이션 UI 업데이트
+    function updatePagination(totalItems, currentPage) {
+        const totalPages = Math.ceil(totalItems / rowsPerPage);
+        const paginationContainer = document.getElementById('pagination');
+        paginationContainer.innerHTML = '';
+
+        // 이전 페이지 버튼
+        const prevButton = document.createElement('button');
+        prevButton.innerText = '이전';
+        prevButton.disabled = currentPage === 1;
+        prevButton.addEventListener('click', () => goToPage(currentPage - 1));
+        paginationContainer.appendChild(prevButton);
+
+        // 페이지 번호 버튼들
+        const maxPageButtons = 5;
+        let startPage = Math.max(1, currentPage - Math.floor(maxPageButtons / 2));
+        let endPage = Math.min(totalPages, startPage + maxPageButtons - 1);
+
+        // 시작 페이지 조정
+        if (endPage - startPage + 1 < maxPageButtons && totalPages >= maxPageButtons) {
+            startPage = Math.max(1, endPage - maxPageButtons + 1);
+        }
+
+        for (let i = startPage; i <= endPage; i++) {
+            const pageButton = document.createElement('button');
+            pageButton.innerText = i;
+            pageButton.classList.toggle('active', i === currentPage);
+            pageButton.addEventListener('click', () => goToPage(i));
+            paginationContainer.appendChild(pageButton);
+        }
+
+        // 다음 페이지 버튼
+        const nextButton = document.createElement('button');
+        nextButton.innerText = '다음';
+        nextButton.disabled = currentPage === totalPages || totalPages === 0;
+        nextButton.addEventListener('click', () => goToPage(currentPage + 1));
+        paginationContainer.appendChild(nextButton);
+
+        // 페이지 상태 표시
+        const pageInfo = document.createElement('span');
+        pageInfo.style.margin = '0 10px';
+        pageInfo.style.lineHeight = '2.5';
+        pageInfo.innerText = totalPages > 0 ? `${currentPage} / ${totalPages} 페이지` : '데이터 없음';
+        paginationContainer.appendChild(pageInfo);
+    }
+
+    // 데이터 정보 업데이트
+    function updateDataInfo(totalItems, startIndex, endIndex) {
+        const infoElement = document.getElementById('data-info');
+        if (totalItems === 0) {
+            infoElement.innerText = '데이터가 없습니다.';
+            return;
+        }
+        infoElement.innerText = `전체 ${totalItems}개 중 ${startIndex + 1}~${endIndex}번째 항목 표시`;
+    }
+
+    // 페이지 이동
+    function goToPage(page) {
+        currentPage = page;
+        const tableData = JSON.parse(localStorage.getItem('commentTableData')) || [];
+        renderTableWithPagination(tableData, page);
+    }
+
+    // 테이블 데이터 저장
+    function saveTableData(data) {
+        localStorage.setItem('commentTableData', JSON.stringify(data));
+    }
+
+    // 새 댓글 추가
+    function addComment() {
+        const commentInput = document.getElementById('commentInput');
+
+        if (commentInput.value.trim() === '') {
+            alert('코멘트를 입력해주세요.');
+            return;
+        }
+
+        // 현재 테이블 데이터 가져오기
+        let tableData = JSON.parse(localStorage.getItem('commentTableData')) || [];
+
+        // 새 코드 생성 (가장 큰 코드 + 1)
+        let maxCode = 3500; // 기본값
+        if (tableData.length > 0) {
+            maxCode = Math.max(...tableData.map(item => item.code));
+        }
+
+        // 새 항목 추가 - 입력된 텍스트 그대로 저장
+        const newItem = {
+            code: maxCode + 1,
+            comment: commentInput.value.trim(),
+            writer: Math.floor(63549879 + Math.random() * 100)
+        };
+
+        // 배열 맨 앞에 추가
+        tableData.unshift(newItem);
+
+        // 저장 및 렌더링
+        saveTableData(tableData);
+        currentPage = 1; // 새 항목 추가 후 첫 페이지로 이동
+        renderTableWithPagination(tableData, currentPage);
+
+        // 입력창 초기화
+        commentInput.value = '';
+    }
+
+    // 행 삭제
+    function deleteRow(code) {
+        if (confirm('정말 삭제하시겠습니까?')) {
+            // 현재 테이블 데이터 가져오기
+            let tableData = JSON.parse(localStorage.getItem('commentTableData')) || [];
+
+            // 삭제 전 항목 수
+            const prevTotal = tableData.length;
+
+            // 해당 코드의 항목 제거
+            tableData = tableData.filter(item => item.code !== code);
+
+            // 저장 및 렌더링
+            saveTableData(tableData);
+
+            // 페이지 번호 조정 (현재 페이지의 모든 항목이 삭제된 경우 이전 페이지로)
+            const totalPages = Math.ceil(tableData.length / rowsPerPage);
+            if (currentPage > totalPages && currentPage > 1) {
+                currentPage = totalPages;
+            }
+
+            renderTableWithPagination(tableData, currentPage);
+        }
+    }
+
+    // 데이터 초기화 - 45개의 샘플 데이터 생성
+    function resetData(showConfirm = true) {
+        if (!showConfirm || confirm('모든 데이터를 초기화하고 45개의 샘플 데이터를 생성하시겠습니까?')) {
+            const sampleData = generateSampleData(45);
+            saveTableData(sampleData);
+            currentPage = 1;
+            renderTableWithPagination(sampleData, currentPage);
+        }
+    }
+</script>
+
+<body>
+    <div class="input-container">
+        <input type="text" id="commentInput" placeholder="코멘트를 입력하세요 (물량과 수량 포함)">
+        <button onclick="addComment()">저장</button>
+        <button onclick="resetData()" style="background-color: #ff9800;">데이터 초기화</button>
+    </div>
+
+    <div id="data-info" class="info-text"></div>
+    <div class="info-text" style="font-style: italic;">* 모든 코멘트에는 '물량'이란 단어와 수량이 포함되어야 합니다. 작성 시 직접 입력해주세요.</div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>코드번호</th>
+                <th>코멘트</th>
+                <th>작성자</th>
+                <th>관리</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- 데이터는 JavaScript로 동적으로 로드됩니다 -->
+        </tbody>
+    </table>
+
+    <div id="pagination" class="pagination">
+        <!-- 페이지네이션 버튼이 여기에 동적으로 생성됩니다 -->
+    </div>
+</body>
+
+</html>

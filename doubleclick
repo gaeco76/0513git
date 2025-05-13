@@ -1,0 +1,26 @@
+// ==UserScript==
+// @name         Auto Copy Selected Text
+// @namespace    http://tampermonkey.net/
+// @version      0.1
+// @description  웹페이지에서 텍스트 선택 시 자동으로 클립보드에 복사
+// @author       You
+// @match        *://*/*
+// @grant        GM_setClipboard
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // mouseup 이벤트에서 선택된 텍스트 감지 (드래그 및 더블클릭 모두 포함)
+    document.addEventListener('mouseup', function() {
+        setTimeout(() => {
+            const selection = window.getSelection();
+            const selectedText = selection.toString().trim();
+            
+            if (selectedText) {
+                GM_setClipboard(selectedText);
+                console.log('텍스트 자동 복사됨:', selectedText);
+            }
+        }, 10); // 선택이 완전히 처리될 시간 고려
+    });
+})();

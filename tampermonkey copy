@@ -1,0 +1,312 @@
+// ==UserScript==
+// @name         테이블 데이터 추출 및 표시
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  HTML 테이블에서 특정 셀 데이터를 추출하여 상단 좌측에 고정된 테이블로 표시
+// @author       Your_Name
+// @match        *://*/*
+// @grant        none
+// @run-at       document-end
+// ==/UserScript==
+
+(function() {
+    'use strict';
+    
+    // DOM이 완전히 로드된 후 실행
+    window.addEventListener('load', function() {
+        // 현재 페이지가 우리가 원하는 테이블을 포함하고 있는지 확인
+        const tables = document.querySelectorAll('.table-container table');
+        if (tables.length < 4) return;
+        
+        // 추출할 데이터 정의 (테이블 인덱스, 행, 열)
+        const dataToExtract = [
+            { name: '입고 날짜', table: 0, row: 1, cell: 0 }, // 테이블 1의 2행 1열
+            { name: '재고', table: 1, row: 1, cell: 2 }, // 테이블 2의 2행 3열
+            { name: '상품 코드', table: 2, row: 1, cell: 0 }, // 테이블 3의 2행 1열
+            { name: '처리 날짜', table: 3, row: 1, cell: 2 } // 테이블 4의 2행 3열
+        ];
+        
+        // 데이터 추출
+        const extractedData = [];
+        
+        dataToExtract.forEach(item => {
+            try {
+                const table = tables[item.table];
+                const rows = table.querySelectorAll('tbody tr');
+                if (rows.length > item.row) {
+                    const cells = rows[item.row].querySelectorAll('td');
+                    if (cells.length > item.cell) {
+                        extractedData.push({
+                            label: item.name,
+                            value: cells[item.cell].textContent.trim()
+                        });
+                    }
+                }
+            } catch (e) {
+                console.error('데이터 추출 중 오류:', e);
+            }
+        });
+        
+        // 테이블 생성 및 추가
+        if (extractedData.length > 0) {
+            createFixedTable(extractedData);
+        }
+    });
+    
+    // 저장된 위치와 크기 불러오기
+    function getSavedSettings() {
+        const defaultSettings = {
+            top: '10px',
+            left: '10px',
+            width: '370px',
+            height: 'auto'
+        };
+        
+        try {
+            const savedSettings = JSON.parse(localStorage.getItem('summaryTableSettings'));
+            return savedSettings || defaultSettings;
+        } catch (e) {
+            console.error('설정 불러오기 오류:', e);
+            return defaultSettings;
+        }
+    }
+    
+    // 설정 저장하기
+    function saveSettings(settings) {
+        try {
+            localStorage.setItem('summaryTableSettings', JSON.stringify(settings));
+        } catch (e) {
+            console.error('설정 저장 중 오류 발생:', e);
+        }
+    }
+    
+    // 픽셀 단위 문자열에서 숫자만 추출
+    function parsePixelValue(value) {
+        if (!value) return 0;
+        const parsed = parseInt(value.replace('px', ''));
+        return isNaN(parsed) ? 0 : parsed;
+    }
+    
+    // 고정 테이블 생성 함수
+    function createFixedTable(data) {
+        // 저장된 설정 불러오기
+        const settings = getSavedSettings();
+        
+        // 테이블 컨테이너 생성
+        const container = document.createElement('div');
+        container.style.position = 'fixed';
+        container.style.top = settings.top;
+        container.style.left = settings.left;
+        container.style.width = settings.width;
+        container.style.height = settings.height;
+        container.style.zIndex = '9999';
+        container.style.backgroundColor = 'white';
+        container.style.padding = '0';
+        container.style.margin = '0';
+        container.style.borderRadius = '5px';
+        container.style.boxShadow = '0 1px 5px rgba(0,0,0,0.2)';
+        container.style.resize = 'both';
+        container.style.overflow = 'hidden';
+        container.style.fontSize = '13px';
+        container.style.boxSizing = 'border-box';
+        
+        // 테이블 생성
+        const table = document.createElement('table');
+        table.style.borderCollapse = 'collapse';
+        table.style.width = '100%';
+        table.style.height = '100%';
+        table.style.tableLayout = 'fixed';
+        table.style.margin = '0';
+        table.style.padding = '0';
+        table.style.borderRadius = '5px';
+        table.style.overflow = 'hidden';
+        
+        // 헤더 행 생성
+        const headerRow = document.createElement('tr');
+        headerRow.style.cursor = 'move'; // 헤더 행을 통해 드래그
+        
+        // 값 행 생성
+        const valueRow = document.createElement('tr');
+        
+        // 각 열에 대한 헤더와 값 추가
+        data.forEach(item => {
+            // 헤더 셀 추가
+            const headerCell = document.createElement('th');
+            headerCell.textContent = item.label;
+            headerCell.style.padding = '4px 2px';
+            headerCell.style.backgroundColor = '#f2f2f2';
+            headerCell.style.border = '1px solid #ddd';
+            headerCell.style.textAlign = 'center';
+            headerCell.style.fontSize = '12px';
+            headerCell.style.fontWeight = 'bold';
+            headerCell.style.whiteSpace = 'nowrap';
+            headerCell.style.overflow = 'hidden';
+            headerCell.style.textOverflow = 'ellipsis';
+            headerRow.appendChild(headerCell);
+            
+            // 값 셀 추가
+            const valueCell = document.createElement('td');
+            valueCell.textContent = item.value;
+            valueCell.style.padding = '4px 2px';
+            valueCell.style.border = '1px solid #ddd';
+            valueCell.style.textAlign = 'center';
+            valueCell.style.fontSize = '13px';
+            valueCell.style.whiteSpace = 'nowrap';
+            valueCell.style.overflow = 'hidden';
+            valueCell.style.textOverflow = 'ellipsis';
+            valueRow.appendChild(valueCell);
+        });
+        
+        // 행을 테이블에 추가
+        table.appendChild(headerRow);
+        table.appendChild(valueRow);
+        
+        // 테이블을 컨테이너에 추가
+        container.appendChild(table);
+        
+        // 컨테이너를 문서에 추가
+        document.body.appendChild(container);
+        
+        // 드래그 기능 초기화 (헤더 행을 통해 드래그)
+        makeDraggable(container, headerRow);
+        
+        // 크기 조정 이벤트 추가 (resize 완료 후)
+        let resizeTimeout;
+        const saveResizeSettings = function() {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(function() {
+                const newSettings = {
+                    top: container.style.top,
+                    left: container.style.left,
+                    width: container.style.width,
+                    height: container.style.height
+                };
+                saveSettings(newSettings);
+            }, 300); // 300ms 후에 저장 (resize 이벤트가 많이 발생하므로 디바운스)
+        };
+        
+        // resize 감지 및 테이블 크기 조정
+        const adjustTableSize = function() {
+            // 테이블이 컨테이너를 꽉 채우도록 조정
+            table.style.width = '100%';
+            table.style.height = '100%';
+            saveResizeSettings();
+        };
+        
+        container.addEventListener('mouseup', adjustTableSize);
+        container.addEventListener('touchend', adjustTableSize);
+        
+        // resize 조정 시 실시간으로 테이블 크기 조정
+        const resizeObserver = new ResizeObserver(() => {
+            table.style.width = '100%';
+            table.style.height = '100%';
+        });
+        
+        resizeObserver.observe(container);
+        
+        // 전역적으로 이벤트 정리
+        if (!window._tableEventListenersInitialized) {
+            window._tableEventListenersInitialized = true;
+            
+            // 페이지 언로드 시 마지막 설정 저장
+            window.addEventListener('beforeunload', function() {
+                if (container && container.parentNode) {
+                    const finalSettings = {
+                        top: container.style.top,
+                        left: container.style.left,
+                        width: container.style.width,
+                        height: container.style.height
+                    };
+                    saveSettings(finalSettings);
+                }
+            });
+        }
+    }
+    
+    // 드래그 가능한 요소 만들기
+    function makeDraggable(element, handle) {
+        let isDragging = false;
+        let startX, startY, initialLeft, initialTop;
+        
+        // 핸들 요소가 없으면 전체 요소를 핸들로 사용
+        handle = handle || element;
+        
+        // 마우스 다운 이벤트
+        handle.addEventListener('mousedown', function(e) {
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            initialLeft = parsePixelValue(element.style.left);
+            initialTop = parsePixelValue(element.style.top);
+            
+            // 드래그 중 텍스트 선택 방지
+            e.preventDefault();
+        });
+        
+        // 터치 시작 이벤트 (모바일 지원)
+        handle.addEventListener('touchstart', function(e) {
+            if (e.touches.length === 1) {
+                isDragging = true;
+                startX = e.touches[0].clientX;
+                startY = e.touches[0].clientY;
+                initialLeft = parsePixelValue(element.style.left);
+                initialTop = parsePixelValue(element.style.top);
+                
+                e.preventDefault();
+            }
+        });
+        
+        // 마우스 이동 이벤트
+        document.addEventListener('mousemove', function(e) {
+            if (!isDragging) return;
+            
+            const newLeft = initialLeft + (e.clientX - startX);
+            const newTop = initialTop + (e.clientY - startY);
+            
+            // 화면 영역을 벗어나지 않도록 제한
+            const maxLeft = window.innerWidth - parsePixelValue(element.style.width) - 20;
+            const maxTop = window.innerHeight - parsePixelValue(element.style.height) - 20;
+            
+            element.style.left = Math.max(0, Math.min(newLeft, maxLeft)) + 'px';
+            element.style.top = Math.max(0, Math.min(newTop, maxTop)) + 'px';
+        });
+        
+        // 터치 이동 이벤트 (모바일 지원)
+        document.addEventListener('touchmove', function(e) {
+            if (!isDragging || e.touches.length !== 1) return;
+            
+            const touch = e.touches[0];
+            const newLeft = initialLeft + (touch.clientX - startX);
+            const newTop = initialTop + (touch.clientY - startY);
+            
+            // 화면 영역을 벗어나지 않도록 제한
+            const maxLeft = window.innerWidth - parsePixelValue(element.style.width) - 20;
+            const maxTop = window.innerHeight - parsePixelValue(element.style.height) - 20;
+            
+            element.style.left = Math.max(0, Math.min(newLeft, maxLeft)) + 'px';
+            element.style.top = Math.max(0, Math.min(newTop, maxTop)) + 'px';
+            
+            e.preventDefault(); // 스크롤 방지
+        }, { passive: false });
+        
+        // 마우스 업 및 터치 종료 이벤트
+        function endDrag() {
+            if (isDragging) {
+                isDragging = false;
+                
+                // 새 위치 저장
+                const newSettings = {
+                    top: element.style.top,
+                    left: element.style.left,
+                    width: element.style.width,
+                    height: element.style.height
+                };
+                saveSettings(newSettings);
+            }
+        }
+        
+        document.addEventListener('mouseup', endDrag);
+        document.addEventListener('touchend', endDrag);
+        document.addEventListener('touchcancel', endDrag);
+    }
+})();
