@@ -1,0 +1,31 @@
+// ==UserScript==
+// @name         탭 제목 자동 변경기
+// @namespace    http://tampermonkey.net/
+// @version      0.1
+// @description  웹페이지 로딩 후 테이블 데이터를 탭 이름으로 변경
+// @author       사용자
+// @match        *://*/*
+// @grant        none
+// @run-at       document-idle
+// ==/UserScript==
+
+(function() {
+    'use strict';
+    
+    // 페이지가 완전히 로드된 후 실행
+    window.addEventListener('load', function() {
+        // 데이터를 가져올 요소 선택
+        const tableElement = document.querySelector('#테이블값');
+        
+        // 요소가 존재하는 경우
+        if (tableElement) {
+            // 요소의 텍스트 내용 가져오기
+            const tableText = tableElement.textContent.trim();
+            
+            // 탭 제목을 "번호" + 테이블 데이터값으로 변경
+            if (tableText) {
+                document.title = "번호" + tableText;
+            }
+        }
+    });
+})();
